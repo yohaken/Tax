@@ -53,6 +53,7 @@ let authReady = false;
 let persistTimer = null;
 let searchTimer = null;
 let rendering = false;
+let pendingRender = false;
 let pendingDemo = false;
 const selectedIds = new Set();
 const selectedGroupKeys = new Set();
@@ -104,8 +105,11 @@ const els = {
   bulkCount: document.getElementById("bulk-count"),
   bulkGroup: document.getElementById("bulk-group"),
   bulkNote: document.getElementById("bulk-note"),
+  btnClearBulkGroup: document.getElementById("btn-clear-bulk-group"),
+  btnClearBulkNote: document.getElementById("btn-clear-bulk-note"),
   btnBulkApply: document.getElementById("btn-bulk-apply"),
   btnBulkClear: document.getElementById("btn-bulk-clear"),
+  btnClearTableZone: document.getElementById("btn-clear-table-zone"),
   btnExport: document.getElementById("btn-export"),
   btnUndo: document.getElementById("btn-undo"),
   btnReloadProject: document.getElementById("btn-reload-project"),
@@ -519,23 +523,34 @@ function highlight(text, query) {
   return safe.replace(re, '<mark class="mark">$1</mark>');
 }
 
-function schedulePersist({ cloud = true } = {}) {
+let persistGen = 0;
+
+function schedulePersist({ cloud = true, immediate = false } = {}) {
   saveState(state, workspace);
   setSync(currentUser ? "บันทึกในเครื่องแล้ว · กำลังซิงค์…" : "บันทึกอัตโนมัติ");
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(async () => {
+  const gen = ++persistGen;
+  const run = async () => {
     if (!cloud || !currentUser || !cloudReady) {
-      setSync(currentUser ? `ออนไลน์ · ${currentUser.email}` : "บันทึกอัตโนมัติในเครื่อง");
+      if (gen === persistGen) {
+        setSync(currentUser ? `ออนไลน์ · ${currentUser.email}` : "บันทึกอัตโนมัติในเครื่อง");
+      }
       return;
     }
     try {
       await pushCloudState(currentUser.uid, state, workspace);
-      setSync(`ซิงค์แล้ว · ${currentUser.email}`);
+      if (gen === persistGen) setSync(`ซิงค์แล้ว · ${currentUser.email}`);
     } catch (err) {
       console.warn(err);
-      setSync("บันทึกในเครื่องแล้ว (คลาวด์ยังไม่พร้อม)");
+      if (gen === persistGen) setSync("บันทึกในเครื่องแล้ว (คลาวด์ยังไม่พร้อม)");
     }
-  }, 450);
+  };
+  // Group moves / renames: flush local+cloud promptly so UI doesn’t feel “ไม่ได้ย้าย”
+  if (immediate) {
+    persistTimer = setTimeout(run, 0);
+  } else {
+    persistTimer = setTimeout(run, 450);
+  }
 }
 
 function sortTransactions(list) {
@@ -604,6 +619,31 @@ function clearAmountFilterInputs() {
   ]) {
     if (el) el.value = "";
   }
+}
+
+function clearTableZoneFilters({ focus = "search" } = {}) {
+  if (els.tableSearch) els.tableSearch.value = "";
+  clearAmountFilterInputs();
+  if (els.bulkGroup) els.bulkGroup.value = "";
+  if (els.bulkNote) els.bulkNote.value = "";
+  updateClearButtonsChrome();
+  scheduleRender();
+  if (focus === "group") els.bulkGroup?.focus();
+  else if (focus === "note") els.bulkNote?.focus();
+  else els.tableSearch?.focus();
+}
+
+function updateClearButtonsChrome() {
+  const hasTableQ = Boolean(String(els.tableSearch?.value || "").trim());
+  const hasAmt = hasAmountRangeFilter();
+  const hasBulk =
+    Boolean(String(els.bulkGroup?.value || "").trim()) ||
+    Boolean(String(els.bulkNote?.value || "").trim());
+  if (els.btnClearTableSearch) els.btnClearTableSearch.hidden = !hasTableQ;
+  if (els.btnClearAmountFilters) els.btnClearAmountFilters.hidden = !hasAmt;
+  if (els.btnClearBulkGroup) els.btnClearBulkGroup.hidden = !String(els.bulkGroup?.value || "").trim();
+  if (els.btnClearBulkNote) els.btnClearBulkNote.hidden = !String(els.bulkNote?.value || "").trim();
+  if (els.btnClearTableZone) els.btnClearTableZone.hidden = !(hasTableQ || hasAmt || hasBulk);
 }
 
 function getTableFiltered() {
@@ -686,12 +726,20 @@ function refreshCategoryOptions() {
   ];
   const merged = [...new Set([...(state.categories || []), ...fromTx])];
   state.categories = merged;
+  // Keep the active filter option even if the group was emptied / merged away,
+  // so the view does not jump to another group after a move.
+  const keepCurrent =
+    current &&
+    current !== "__uncat" &&
+    !isReservedCategoryName(current) &&
+    !merged.includes(current);
+  const options = keepCurrent ? [...merged, current] : merged;
   els.categoryDatalist.innerHTML = merged
     .map((c) => `<option value="${escapeHtml(c)}"></option>`)
     .join("");
   els.filterCategory.innerHTML =
     `<option value="">ทุกกลุ่ม</option><option value="__uncat">ยังไม่มีกลุ่ม</option>` +
-    merged.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    options.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
   if ([...els.filterCategory.options].some((o) => o.value === current)) {
     els.filterCategory.value = current;
   }
@@ -995,20 +1043,29 @@ function mergeSelectedGroups() {
       dest,
       ...state.categories.filter((c) => c !== dest && !moving.includes(c)),
     ];
-    if (els.filterCategory && (moving.includes(els.filterCategory.value) || els.filterCategory.value === dest)) {
-      els.filterCategory.value = dest;
-    }
+    // Stay on the currently filtered group — do not jump focus to destination.
   });
   selectedGroupKeys.clear();
   clearMergeTarget();
   updateGroupMergeBar();
-  schedulePersist();
+  schedulePersist({ immediate: true });
   scheduleRender();
-  toast(`รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`);
+  const still = els.filterCategory?.value || "";
+  toast(
+    still && still !== dest
+      ? `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ · ยังดู “${still}” อยู่`
+      : `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`
+  );
 }
 
 function renderGroupSummary() {
   if (!els.groupList) return;
+  // Don't wipe an open rename form mid-edit
+  if (els.groupList.querySelector("[data-rename-form]")) {
+    renderPeriodChips();
+    updateGroupMergeBar();
+    return;
+  }
   renderPeriodChips();
   const base = getSummaryBase();
   updatePeriodRangeLabel(base);
@@ -1308,9 +1365,21 @@ function updateSortHeaders() {
   });
 }
 
+function endRenderPass() {
+  rendering = false;
+  if (pendingRender) {
+    pendingRender = false;
+    scheduleRender();
+  }
+}
+
 function renderTable() {
-  if (rendering) return;
+  if (rendering) {
+    pendingRender = true;
+    return;
+  }
   rendering = true;
+  pendingRender = false;
 
   if (!authReady) {
     els.loginGate?.classList.remove("is-hidden");
@@ -1318,7 +1387,7 @@ function renderTable() {
     els.workspace?.classList.add("is-hidden");
     els.authTools?.classList.add("is-hidden");
     setSync("กำลังตรวจสอบสิทธิ์…");
-    rendering = false;
+    endRenderPass();
     return;
   }
 
@@ -1330,7 +1399,7 @@ function renderTable() {
     if (els.txBody) els.txBody.innerHTML = "";
     if (els.groupList) els.groupList.innerHTML = "";
     setSync("ต้องเข้าสู่ระบบก่อน");
-    rendering = false;
+    endRenderPass();
     return;
   }
 
@@ -1346,7 +1415,7 @@ function renderTable() {
   updateSortHeaders();
 
   if (!hasData) {
-    rendering = false;
+    endRenderPass();
     return;
   }
 
@@ -1357,9 +1426,7 @@ function renderTable() {
   renderGroupSummary();
   const qHighlight =
     String(els.tableSearch?.value || "").trim() || String(els.search?.value || "").trim();
-  if (els.btnClearTableSearch) {
-    els.btnClearTableSearch.hidden = !String(els.tableSearch?.value || "").trim();
-  }
+  updateClearButtonsChrome();
 
   els.txBody.innerHTML = slice
     .map((t) => {
@@ -1390,7 +1457,7 @@ function renderTable() {
   if (visible.length > MAX) {
     els.resultLabel.textContent += ` · แสดง ${MAX} แถวแรก กรองเพิ่มเพื่อเจอรายการลึก`;
   }
-  rendering = false;
+  endRenderPass();
 }
 
 function scheduleRender() {
@@ -1455,19 +1522,23 @@ function wireTableRowDragSelect() {
   });
 }
 
+/**
+ * After moving items out of the active filter, keep viewing the current group.
+ * Do not auto-switch focus to the destination group.
+ * @returns {string} optional status note for the toast
+ */
 function followFilterAfterMove(prevCategories, nextCategory) {
   const filter = els.filterCategory?.value;
-  if (!filter) return;
+  if (!filter) return "";
   const leftFilter = [...prevCategories].some((c) => (c || "__uncat") === filter);
-  if (!leftFilter) return;
+  if (!leftFilter) return "";
   if (filter === "__uncat" && nextCategory) {
-    toast(`ติดกลุ่มแล้ว · แถวยังถูกซ่อนอยู่เพราะกรอง “ยังไม่มีกลุ่ม” — สลับตัวกรองได้ด้านบน`);
-    return;
+    return `ยังกรอง “ยังไม่มีกลุ่ม” อยู่`;
   }
   if (nextCategory && filter !== nextCategory && filter !== "__uncat") {
-    els.filterCategory.value = nextCategory;
-    toast(`ย้ายไป “${nextCategory}” แล้ว · เปลี่ยนตัวกรองตามกลุ่มใหม่`);
+    return `ยังดูกลุ่ม “${filter}” อยู่`;
   }
+  return "";
 }
 
 function confirmAutoTag(category, preview) {
@@ -1515,10 +1586,11 @@ function patchTx(id, patch, { learn = false, recordUndo = true, undoLabel = "แ
     if (!state.categories.includes(patch.category)) state.categories.unshift(patch.category);
     const auto = learnRulesFromSeeds([tx], patch.category);
     if (auto > 0) toast(`ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")} รายการ`);
-    followFilterAfterMove([prevCat], patch.category);
+    const stay = followFilterAfterMove([prevCat], patch.category);
+    if (stay && auto <= 0) toast(`ย้ายไป “${patch.category}” แล้ว · ${stay}`);
   }
   if (recordUndo && before) pushUndo(undoLabel, before);
-  schedulePersist();
+  schedulePersist({ immediate: Boolean(learn && patch.category) });
 }
 
 function applyBulk() {
@@ -1556,14 +1628,25 @@ function applyBulk() {
     if (group && !state.categories.includes(group)) state.categories.unshift(group);
     if (group && seeds.length) auto = learnRulesFromSeeds(seeds, group);
   });
-  if (group) followFilterAfterMove(prevCats, group);
-  schedulePersist();
+  if (group) {
+    const stay = followFilterAfterMove(prevCats, group);
+    // Drop ticks that left the current table view so re-apply doesn't feel "ค้าง"
+    const stillVisible = new Set(getTableFiltered().map((t) => t.id));
+    for (const id of [...selectedIds]) {
+      if (!stillVisible.has(id)) selectedIds.delete(id);
+    }
+    schedulePersist({ immediate: true });
+    scheduleRender();
+    const base =
+      auto > 0
+        ? `ใส่ให้ ${n.toLocaleString("th-TH")} ที่เลือก · ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")}`
+        : `ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`;
+    toast(stay ? `${base} · ${stay}` : base);
+    return;
+  }
+  schedulePersist({ immediate: true });
   scheduleRender();
-  toast(
-    auto > 0
-      ? `ใส่ให้ ${n.toLocaleString("th-TH")} ที่เลือก · ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")}`
-      : `ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`
-  );
+  toast(`ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`);
 }
 
 function renameGroup(oldName, newName) {
@@ -1606,7 +1689,7 @@ function renameGroup(oldName, newName) {
     }
     if (els.filterCategory.value === prev) els.filterCategory.value = next;
   });
-  schedulePersist();
+  schedulePersist({ immediate: true });
   scheduleRender();
   toast(`เปลี่ยนชื่อเป็น “${next}”`);
   return true;
@@ -1635,13 +1718,14 @@ function deleteEmptyGroup(groupKey) {
 
 function beginRenameGroup(groupKey) {
   if (!groupKey || groupKey === "__uncat") return;
-  const row = [...(els.groupList?.querySelectorAll("[data-group]") || [])].find(
+  // Must match the title cell — first td is the checkbox column.
+  const row = [...(els.groupList?.querySelectorAll("tr[data-group]") || [])].find(
     (el) => el.getAttribute("data-group") === groupKey
   );
-  const cell = row?.querySelector("td");
-  if (!cell || cell.querySelector("[data-rename-form]")) return;
-  const titleRow = cell.querySelector(".group-title-row");
-  if (!titleRow) return;
+  const titleRow = row?.querySelector(".group-title-row");
+  const cell = titleRow?.parentElement;
+  if (!titleRow || !cell) return;
+  if (cell.querySelector("[data-rename-form]")) return;
   titleRow.hidden = true;
   const form = document.createElement("form");
   form.className = "rename-form";
@@ -1655,11 +1739,19 @@ function beginRenameGroup(groupKey) {
   const input = form.querySelector("input");
   input.focus();
   input.select();
+  form.addEventListener("click", (e) => e.stopPropagation());
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    renameGroup(groupKey, input.value);
+    e.stopPropagation();
+    const ok = renameGroup(groupKey, input.value);
+    if (!ok) {
+      input.focus();
+      input.select();
+    }
   });
-  form.querySelector("[data-rename-cancel]")?.addEventListener("click", () => {
+  form.querySelector("[data-rename-cancel]")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     form.remove();
     titleRow.hidden = false;
   });
@@ -2198,13 +2290,34 @@ function wireEvents() {
   });
 
   ["input", "change"].forEach((evt) => {
-    els.tableSearch?.addEventListener(evt, scheduleRender);
+    els.tableSearch?.addEventListener(evt, () => {
+      updateClearButtonsChrome();
+      scheduleRender();
+    });
   });
   els.btnClearTableSearch?.addEventListener("click", () => {
     if (!els.tableSearch) return;
     els.tableSearch.value = "";
+    updateClearButtonsChrome();
     scheduleRender();
     els.tableSearch.focus();
+  });
+
+  els.btnClearBulkGroup?.addEventListener("click", () => {
+    if (!els.bulkGroup) return;
+    els.bulkGroup.value = "";
+    updateClearButtonsChrome();
+    els.bulkGroup.focus();
+  });
+  els.btnClearBulkNote?.addEventListener("click", () => {
+    if (!els.bulkNote) return;
+    els.bulkNote.value = "";
+    updateClearButtonsChrome();
+    els.bulkNote.focus();
+  });
+  ["input", "change"].forEach((evt) => {
+    els.bulkGroup?.addEventListener(evt, updateClearButtonsChrome);
+    els.bulkNote?.addEventListener(evt, updateClearButtonsChrome);
   });
 
   const amountInputs = [
@@ -2216,12 +2329,23 @@ function wireEvents() {
     els.amtValMax,
   ];
   amountInputs.forEach((el) => {
-    el?.addEventListener("input", () => scheduleRender());
-    el?.addEventListener("change", () => scheduleRender());
+    el?.addEventListener("input", () => {
+      updateClearButtonsChrome();
+      scheduleRender();
+    });
+    el?.addEventListener("change", () => {
+      updateClearButtonsChrome();
+      scheduleRender();
+    });
   });
   els.btnClearAmountFilters?.addEventListener("click", () => {
     clearAmountFilterInputs();
+    updateClearButtonsChrome();
     scheduleRender();
+  });
+  els.btnClearTableZone?.addEventListener("click", () => {
+    clearTableZoneFilters({ focus: "search" });
+    toast("เคลียร์ค้นหาตาราง · ช่วงยอด · ช่องกลุ่ม/Note แล้ว");
   });
 
   wireTableRowDragSelect();
@@ -2333,6 +2457,8 @@ function wireEvents() {
     }
     const renameBtn = e.target.closest("[data-rename-group]");
     if (renameBtn) {
+      e.preventDefault();
+      e.stopPropagation();
       beginRenameGroup(renameBtn.getAttribute("data-rename-group"));
       return;
     }

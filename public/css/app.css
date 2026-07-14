@@ -197,7 +197,7 @@ body {
 
 .bulk-bar {
   display: grid;
-  grid-template-columns: auto auto 1fr 1fr auto auto;
+  grid-template-columns: auto auto minmax(8rem, 1fr) minmax(8rem, 1fr) auto auto;
   gap: 0.4rem;
   align-items: center;
   margin: 0 0 0.65rem;
@@ -205,6 +205,16 @@ body {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--card);
+}
+.bulk-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.3rem;
+  align-items: center;
+  min-width: 0;
+}
+.bulk-field .btn.tiny {
+  white-space: nowrap;
 }
 .table-tools {
   display: flex;
@@ -741,6 +751,7 @@ body.is-row-dragging .tx-table td {
     grid-template-columns: 1fr 1fr;
   }
   .bulk-check, .bulk-count { grid-column: span 1; }
+  .bulk-field { grid-column: 1 / -1; }
   .table-scroll {
     max-height: none;
     overflow-x: auto;

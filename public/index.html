@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=36" />
+  <link rel="stylesheet" href="css/app.css?v=37" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -135,8 +135,14 @@
           <span>เลือกทั้งหมดที่กรอง</span>
         </label>
         <span class="bulk-count" id="bulk-count">เลือก 0</span>
-        <input id="bulk-group" list="category-datalist" placeholder="ใส่กลุ่มให้ที่เลือก…" />
-        <input id="bulk-note" type="text" placeholder="ใส่ Note ให้ที่เลือก…" />
+        <div class="bulk-field">
+          <input id="bulk-group" list="category-datalist" placeholder="ใส่กลุ่มให้ที่เลือก…" />
+          <button type="button" class="btn quiet tiny" id="btn-clear-bulk-group" title="เคลียร์ช่องกลุ่ม">เคลียร์กลุ่ม</button>
+        </div>
+        <div class="bulk-field">
+          <input id="bulk-note" type="text" placeholder="ใส่ Note ให้ที่เลือก…" />
+          <button type="button" class="btn quiet tiny" id="btn-clear-bulk-note" title="เคลียร์ช่อง Note">เคลียร์ Note</button>
+        </div>
         <button type="button" class="btn solid tiny" id="btn-bulk-apply">ใส่ให้ที่เลือก</button>
         <button type="button" class="btn quiet tiny" id="btn-bulk-clear">เคลียร์ติ๊ก</button>
       </div>
@@ -150,7 +156,7 @@
             autocomplete="off"
             aria-label="ค้นหาในตารางรายละเอียด"
           />
-          <button type="button" class="btn quiet tiny" id="btn-clear-table-search" title="ล้างค้นหาตาราง">ล้าง</button>
+          <button type="button" class="btn quiet tiny" id="btn-clear-table-search" title="เคลียร์ค่าค้นหาในตาราง">เคลียร์ค้นหา</button>
         </div>
         <div class="amount-filters" id="amount-filters" aria-label="กรองช่วงยอดเงิน">
           <span class="amount-filters-title">ช่วงยอด</span>
@@ -173,6 +179,7 @@
             <input id="amt-val-max" type="number" inputmode="decimal" min="0" step="any" placeholder="สูง" aria-label="มูลค่าสูงสุด" />
           </label>
           <button type="button" class="btn quiet tiny" id="btn-clear-amount-filters" title="ล้างตัวกรองยอด">ล้างยอด</button>
+          <button type="button" class="btn quiet tiny" id="btn-clear-table-zone" title="เคลียร์ค้นหาตาราง · ช่วงยอด · ช่องกลุ่ม/Note ในแถบนี้">เคลียร์ทุกค่า</button>
         </div>
         <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้</span>
       </div>
@@ -204,6 +211,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
-  <script type="module" src="js/app.js?v=36"></script>
+  <script type="module" src="js/app.js?v=37"></script>
 </body>
 </html>
