@@ -2,9 +2,10 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="TaxTag — จัดหมวดรายการโอน Peerland / statement ส่วนตัว" />
   <meta name="theme-color" content="#f7f6f2" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>TaxTag</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -52,7 +53,10 @@
 
     <section class="workspace is-hidden" id="workspace">
       <div class="filters">
-        <input id="search-input" type="search" placeholder="ค้นหาชื่อ · ยอดเงิน · กลุ่ม · note…" autocomplete="off" />
+        <div class="search-wrap">
+          <input id="search-input" type="search" placeholder="ค้นหาชื่อ · ยอดเงิน · กลุ่ม · note…" autocomplete="off" />
+          <button type="button" class="btn quiet tiny" id="btn-clear-search" title="ล้างคำค้นหา">ล้าง</button>
+        </div>
         <select id="filter-category" aria-label="กลุ่ม">
           <option value="">ทุกกลุ่ม</option>
           <option value="__uncat">ยังไม่มีกลุ่ม</option>
@@ -66,6 +70,11 @@
         <input id="date-to" type="date" aria-label="ถึงวันที่" />
       </div>
 
+      <form class="add-group" id="add-group-form">
+        <input id="new-group-name" type="text" placeholder="เพิ่มชื่อกลุ่มเอง…" maxlength="60" required />
+        <button type="submit" class="btn solid tiny">เพิ่มกลุ่ม</button>
+      </form>
+
       <div class="stats" id="stat-grid">
         <span><em id="stat-count">0</em> รายการ</span>
         <span>ยังไม่ติดกลุ่ม <em id="stat-uncat">0</em></span>
@@ -75,22 +84,50 @@
 
       <section class="group-summary" id="group-summary" aria-label="สรุปตามกลุ่ม">
         <div class="group-summary-head">
-          <h2>สรุปตามกลุ่ม</h2>
-          <p>จำแนกรายการเป็นกลุ่ม แล้วยอดรวมแยกชัด — กดพิมพ์เฉพาะกลุ่มได้</p>
+          <div>
+            <h2>สรุปตามกลุ่ม</h2>
+            <p>Note กลุ่มแก้ได้ · เรียงตามมูลค่าได้</p>
+          </div>
+          <label class="sort-inline">
+            เรียง
+            <select id="group-sort" aria-label="เรียงสรุปกลุ่ม">
+              <option value="abs-desc">มูลค่ามาก→น้อย</option>
+              <option value="abs-asc">มูลค่าน้อย→มาก</option>
+              <option value="in-desc">เงินเข้ามากสุด</option>
+              <option value="out-desc">เงินออกมากสุด</option>
+              <option value="net-desc">สุทธิมากสุด</option>
+              <option value="count-desc">จำนวนรายการ</option>
+              <option value="name-asc">ชื่อ ก–ฮ</option>
+            </select>
+          </label>
         </div>
         <div class="group-list" id="group-list"></div>
       </section>
+
+      <div class="bulk-bar" id="bulk-bar">
+        <label class="bulk-check">
+          <input type="checkbox" id="check-all" />
+          <span>เลือกที่แสดง</span>
+        </label>
+        <span class="bulk-count" id="bulk-count">เลือก 0</span>
+        <input id="bulk-group" list="category-datalist" placeholder="ใส่กลุ่มให้ที่เลือก…" />
+        <input id="bulk-note" type="text" placeholder="ใส่ Note ให้ที่เลือก…" />
+        <button type="button" class="btn solid tiny" id="btn-bulk-apply">ใส่ให้ที่เลือก</button>
+        <button type="button" class="btn quiet tiny" id="btn-bulk-clear">เคลียร์ติ๊ก</button>
+      </div>
 
       <div class="table-scroll">
         <table class="tx-table" id="tx-table">
           <thead>
             <tr>
-              <th>วันที่</th>
-              <th>รายละเอียด</th>
-              <th class="num">เข้า</th>
-              <th class="num">ออก</th>
-              <th>กลุ่ม</th>
-              <th>Note</th>
+              <th class="col-check"></th>
+              <th><button type="button" class="th-sort" data-sort="date">วันที่</button></th>
+              <th><button type="button" class="th-sort" data-sort="desc">รายละเอียด</button></th>
+              <th class="num"><button type="button" class="th-sort" data-sort="in">เข้า</button></th>
+              <th class="num"><button type="button" class="th-sort" data-sort="out">ออก</button></th>
+              <th class="num"><button type="button" class="th-sort" data-sort="amount">มูลค่า</button></th>
+              <th><button type="button" class="th-sort" data-sort="group">กลุ่ม</button></th>
+              <th><button type="button" class="th-sort" data-sort="note">Note</button></th>
             </tr>
           </thead>
           <tbody id="tx-body"></tbody>
@@ -101,7 +138,6 @@
   </main>
 
   <div id="print-root" class="print-root" hidden></div>
-
   <datalist id="category-datalist"></datalist>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

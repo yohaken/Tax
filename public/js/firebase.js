@@ -1,11 +1,14 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
   GoogleAuthProvider,
+  indexedDBLocalPersistence,
   browserLocalPersistence,
+  initializeAuth,
   getAuth,
   onAuthStateChanged,
-  setPersistence,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import {
@@ -31,6 +34,10 @@ let app = null;
 export let auth = null;
 export let db = null;
 
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia("(max-width: 768px)").matches;
+}
+
 export async function initFirebase() {
   if (app) return { auth, db };
   let config = { ...PROJECT_DEFAULTS };
@@ -38,17 +45,23 @@ export async function initFirebase() {
     const res = await fetch("/__/firebase/init.json");
     if (res.ok) config = { ...config, ...(await res.json()) };
   } catch {
-    /* local / GitHub Pages */
+    /* non-Firebase hosting */
   }
   // Keep authDomain on *.firebaseapp.com so Google OAuth redirect stays valid.
   config.authDomain = PROJECT_DEFAULTS.authDomain;
   app = initializeApp(config);
-  auth = getAuth(app);
+  try {
+    auth = initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+    });
+  } catch {
+    auth = getAuth(app);
+  }
   db = getFirestore(app);
   try {
-    await setPersistence(auth, browserLocalPersistence);
-  } catch {
-    /* best-effort */
+    await getRedirectResult(auth);
+  } catch (err) {
+    console.warn("redirect result", err);
   }
   return { auth, db };
 }
@@ -60,8 +73,21 @@ export function watchAuth(callback) {
 
 export async function loginWithGoogle() {
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account", login_hint: ALLOWED_EMAIL });
-  const result = await signInWithPopup(auth, provider);
+  provider.setCustomParameters({ login_hint: ALLOWED_EMAIL });
+  let result;
+  try {
+    if (isMobile()) {
+      await signInWithRedirect(auth, provider);
+      return null; // page will reload
+    }
+    result = await signInWithPopup(auth, provider);
+  } catch (err) {
+    if (err?.code === "auth/popup-blocked" || err?.code === "auth/popup-closed-by-user") {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw err;
+  }
   const email = (result.user?.email || "").toLowerCase();
   if (email !== ALLOWED_EMAIL.toLowerCase()) {
     await signOut(auth);
@@ -88,6 +114,7 @@ export async function pullCloudState(uid) {
     transactions: Array.isArray(data.transactions) ? data.transactions : [],
     categories: Array.isArray(data.categories) ? data.categories : [],
     rules: Array.isArray(data.rules) ? data.rules : [],
+    groupNotes: data.groupNotes && typeof data.groupNotes === "object" ? data.groupNotes : {},
     updatedAt: data.updatedAt || null,
   };
 }
@@ -99,6 +126,7 @@ export async function pushCloudState(uid, state) {
       transactions: state.transactions || [],
       categories: state.categories || [],
       rules: state.rules || [],
+      groupNotes: state.groupNotes || {},
       updatedAt: serverTimestamp(),
       ownerEmail: ALLOWED_EMAIL,
     },

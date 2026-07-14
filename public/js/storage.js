@@ -22,6 +22,7 @@ export function loadState() {
         transactions: [],
         categories: [...DEFAULT_CATEGORIES],
         rules: [],
+        groupNotes: {},
       };
     }
     const data = JSON.parse(raw);
@@ -31,12 +32,14 @@ export function loadState() {
         ? data.categories
         : [...DEFAULT_CATEGORIES],
       rules: Array.isArray(data.rules) ? data.rules : [],
+      groupNotes: data.groupNotes && typeof data.groupNotes === "object" ? data.groupNotes : {},
     };
   } catch {
     return {
       transactions: [],
       categories: [...DEFAULT_CATEGORIES],
       rules: [],
+      groupNotes: {},
     };
   }
 }
@@ -48,6 +51,7 @@ export function saveState(state) {
       transactions: state.transactions,
       categories: state.categories,
       rules: state.rules,
+      groupNotes: state.groupNotes || {},
       savedAt: new Date().toISOString(),
     })
   );
