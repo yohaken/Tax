@@ -103,6 +103,7 @@ const els = {
   btnExport: document.getElementById("btn-export"),
   btnUndo: document.getElementById("btn-undo"),
   btnReloadProject: document.getElementById("btn-reload-project"),
+  btnSplitMerged: document.getElementById("btn-split-merged"),
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
   btnAuthHero: document.getElementById("btn-auth-hero"),
@@ -210,7 +211,15 @@ function switchProject(projectId) {
   toast(`เปิดโปรเจกต์ “${next.name}”`);
 }
 
-function createProjectFromRows({ name, source, rows, categories, rules = [], groupNotes = {} }) {
+function createProjectFromRows({
+  name,
+  source,
+  rows,
+  categories,
+  rules = [],
+  groupNotes = {},
+  activate = true,
+}) {
   syncActiveFromState();
   const project = {
     id: makeProjectId(),
@@ -226,12 +235,117 @@ function createProjectFromRows({ name, source, rows, categories, rules = [], gro
     }),
   };
   workspace.projects = workspace.projects.filter(
-    (p) => !(Array.isArray(p.transactions) && p.transactions.length === 0 && (p.name === "โปรเจกต์ว่าง" || p.source === "local"))
+    (p) =>
+      !(
+        Array.isArray(p.transactions) &&
+        p.transactions.length === 0 &&
+        (p.name === "โปรเจกต์ว่าง" || p.source === "local")
+      )
   );
   workspace.projects.unshift(project);
-  applyProjectToState(project);
-  clearSessionUi();
+  if (activate) {
+    applyProjectToState(project);
+    clearSessionUi();
+  }
   return project;
+}
+
+function isPeerlandSource(source) {
+  return String(source || "")
+    .toLowerCase()
+    .includes("peerland");
+}
+
+function sourceGroupKey(source) {
+  const s = String(source || "").trim();
+  if (isPeerlandSource(s)) return "__peerland__";
+  if (!s) return "__unknown__";
+  // Strip sheet suffix "file.xlsx · Sheet1" → file.xlsx for grouping
+  return s.split(" · ")[0].trim() || s;
+}
+
+function projectNameFromSourceKey(key) {
+  if (key === "__peerland__") return "Peerland 2024–2025";
+  if (key === "__unknown__") return "ไฟล์นำเข้า (ไม่ทราบชื่อ)";
+  return String(key).replace(/\.[^.]+$/, "").slice(0, 70) || "ไฟล์นำเข้า";
+}
+
+/** Split a project that mixed Peerland + other imports into separate projects. */
+function splitProjectBySources(project) {
+  const rows = Array.isArray(project.transactions) ? project.transactions : [];
+  const groups = new Map();
+  for (const t of rows) {
+    const key = sourceGroupKey(t.source);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  if (groups.size <= 1) return [];
+
+  let keepKey = groups.has("__peerland__") ? "__peerland__" : null;
+  if (!keepKey) {
+    keepKey = [...groups.entries()].sort((a, b) => b[1].length - a[1].length)[0][0];
+  }
+
+  const created = [];
+  for (const [key, list] of groups) {
+    if (key === keepKey) continue;
+    // Skip empty accidentals
+    if (!list.length) continue;
+    // Avoid duplicate project if same-name import already exists with identical count+source
+    const name = projectNameFromSourceKey(key);
+    const exists = workspace.projects.some(
+      (p) =>
+        p.id !== project.id &&
+        p.source === "import" &&
+        p.name === name &&
+        Array.isArray(p.transactions) &&
+        p.transactions.length === list.length
+    );
+    if (exists) continue;
+    const np = createProjectFromRows({
+      name,
+      source: "import",
+      rows: list.map((t) => ({ ...t })),
+      categories: defaultCategories(),
+      rules: [],
+      groupNotes: {},
+      activate: false,
+    });
+    created.push(np);
+  }
+
+  const keepRows = groups.get(keepKey) || [];
+  project.transactions = keepRows;
+  if (keepKey === "__peerland__") {
+    project.name = "Peerland 2024–2025";
+    project.source = "peerland";
+    project.projectSource = "peerland";
+  }
+  project.updatedAt = new Date().toISOString();
+  return created;
+}
+
+function recoverMergedImports({ silent = false } = {}) {
+  syncActiveFromState();
+  const created = [];
+  for (const project of [...workspace.projects]) {
+    created.push(...splitProjectBySources(project));
+  }
+  const active = workspace.projects.find((p) => p.id === workspace.activeId) || workspace.projects[0];
+  if (active) applyProjectToState(active);
+  schedulePersist();
+  renderProjectSelect();
+  scheduleRender();
+  if (!created.length) {
+    if (!silent) toast("ไม่พบไฟล์ที่ถูกรวมในโปรเจกต์");
+    return [];
+  }
+  toast(
+    `แยก ${created.length.toLocaleString("th-TH")} โปรเจกต์จากไฟล์ที่รวมผิด · ${created
+      .map((p) => p.name)
+      .join(" · ")}`
+  );
+  return created;
 }
 
 function setSync(text) {
@@ -1029,43 +1143,60 @@ async function importFiles(fileList) {
   if (!requireLogin("ต้องเข้าสู่ระบบก่อนจึงจะนำเข้าไฟล์ได้")) return;
   const files = [...fileList].filter(Boolean);
   if (!files.length) return;
-  toast(`กำลังอ่าน ${files.length} ไฟล์เป็นโปรเจกต์ใหม่…`);
-  let imported = [];
+
+  // Always create new project(s) — never merge into the current one.
+  syncActiveFromState();
+  toast(`กำลังสร้างโปรเจกต์ใหม่จาก ${files.length} ไฟล์…`);
+
+  const created = [];
   for (const file of files) {
     try {
-      const rows = await parseFile(file);
-      imported = imported.concat(rows);
+      let rows = await parseFile(file);
+      rows = dedupeTransactions(rows).map((t) => ({
+        ...t,
+        category: "",
+        note: "",
+        source: t.source || file.name,
+      }));
       await new Promise((r) => setTimeout(r, 0));
+      if (!rows.length) {
+        toast(`${file.name}: ไม่พบรายการ`);
+        continue;
+      }
+      const baseName = String(file.name || "ไฟล์ใหม่").replace(/\.[^.]+$/, "").slice(0, 70);
+      const project = createProjectFromRows({
+        name: baseName,
+        source: "import",
+        rows,
+        categories: defaultCategories(),
+        rules: [],
+        groupNotes: {},
+        activate: false,
+      });
+      created.push(project);
     } catch (err) {
       console.error(err);
       toast(`${file.name}: ${err.message || "อ่านไม่สำเร็จ"}`);
     }
   }
-  imported = dedupeTransactions(imported).map((t) => ({
-    ...t,
-    category: t.category || "",
-    note: t.note || "",
-  }));
-  if (!imported.length) {
-    toast("ไม่พบรายการในไฟล์");
+
+  if (!created.length) {
+    toast("ไม่พบรายการในไฟล์ — ไม่ได้สร้างโปรเจกต์");
     return;
   }
-  const baseName =
-    files.length === 1
-      ? String(files[0].name || "ไฟล์ใหม่").replace(/\.[^.]+$/, "")
-      : `นำเข้า ${files.length} ไฟล์`;
-  createProjectFromRows({
-    name: baseName,
-    source: "import",
-    rows: imported,
-    categories: defaultCategories(),
-    rules: [],
-    groupNotes: {},
-  });
+
+  // Switch to the newest imported project only.
+  const latest = created[0];
+  applyProjectToState(latest);
+  clearSessionUi();
   schedulePersist();
   renderProjectSelect();
   renderTable();
-  toast(`สร้างโปรเจกต์ “${baseName}” · ${imported.length.toLocaleString("th-TH")} รายการ (แยกจากของเดิม)`);
+  toast(
+    created.length === 1
+      ? `สร้างโปรเจกต์ “${latest.name}” · ${latest.transactions.length.toLocaleString("th-TH")} รายการ (แยกจากของเดิม)`
+      : `สร้าง ${created.length.toLocaleString("th-TH")} โปรเจกต์ใหม่ · เปิด “${latest.name}”`
+  );
 }
 
 async function startDemo({ replace = true, fresh = false, recordUndo = true } = {}) {
@@ -1266,12 +1397,14 @@ async function setupAuth() {
         }
         setSync(`ซิงค์แล้ว · ${user.email}`);
         renderProjectSelect();
+        recoverMergedImports({ silent: true });
       } catch (err) {
         console.warn(err);
         setSync(`ล็อกอินแล้ว · ${user.email}`);
       }
       renderTable();
       await runPendingLoads();
+      recoverMergedImports({ silent: true });
     });
   } catch (err) {
     console.warn(err);
@@ -1490,6 +1623,10 @@ function wireEvents() {
     scheduleRender();
   });
   els.btnUndo?.addEventListener("click", undoLast);
+  els.btnSplitMerged?.addEventListener("click", () => {
+    if (!requireLogin()) return;
+    recoverMergedImports({ silent: false });
+  });
   els.btnReloadProject?.addEventListener("click", () => {
     reloadProjectFresh().catch((err) => toast(err.message || "อ่านใหม่ไม่สำเร็จ"));
   });
