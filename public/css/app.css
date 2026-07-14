@@ -435,6 +435,15 @@ body {
   white-space: nowrap;
 }
 .group-title-btn:hover { color: var(--accent); }
+.group-title-btn.muted {
+  color: var(--mute);
+  cursor: default;
+  pointer-events: none;
+}
+.group-table tr.is-empty-group td {
+  opacity: 0.72;
+}
+.muted { color: var(--mute); }
 .group-title-row .btn.tiny {
   flex: 0 0 auto;
   padding: 0.15rem 0.45rem;

@@ -9,6 +9,8 @@ import {
   extractKeywords,
   upsertRule,
   applyRules,
+  previewApplyRules,
+  isReservedCategoryName,
   smartSearch,
   formatMoney,
   formatDateTh,
@@ -67,10 +69,10 @@ const PEERLAND_RULES = [
   { keywords: ["lazada"], category: "Shopee / Lazada" },
   { keywords: ["บัตรกสิกรไทย"], category: "ชำระบัตรกสิกร" },
   { keywords: ["ค่าธรรมเนียม"], category: "ค่าธรรมเนียม" },
-  { keywords: ["my qr", "รับโอนเงินผ่าน qr"], category: "รายได้ลูกค้า / QR" },
+  { keywords: ["my qr"], category: "รายได้ลูกค้า / QR" },
   { keywords: ["ซีพี แอ็กซ์ตร้า", "cp axtra"], category: "สินค้า / ซูเปอร์มาร์เก็ต" },
   { keywords: ["ksecurities", "หลักทรัพย์"], category: "หลักทรัพย์ / ออม" },
-  { keywords: ["phiraphong yohakh", "พีระพงษ์ โยหาเ"], category: "โอนภายใน / ส่วนตัว" },
+  { keywords: ["phiraphong yohakh", "พีระพงษ์"], category: "โอนภายใน / ส่วนตัว" },
 ];
 
 const els = {
@@ -111,6 +113,7 @@ const els = {
   btnDeleteProject: document.getElementById("btn-delete-project"),
   btnRenameProject: document.getElementById("btn-rename-project"),
   btnOpenTelltea: document.getElementById("btn-open-telltea"),
+  btnOpenPeerland: document.getElementById("btn-open-peerland"),
   projectNameLabel: document.getElementById("project-name-label"),
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
@@ -175,7 +178,7 @@ function syncActiveFromState() {
 
 function applyProjectToState(project) {
   state.transactions = Array.isArray(project.transactions) ? project.transactions : [];
-  state.categories = project.categories?.length ? [...project.categories] : defaultCategories();
+  state.categories = Array.isArray(project.categories) ? [...project.categories] : [];
   state.rules = Array.isArray(project.rules) ? project.rules : [];
   state.groupNotes = project.groupNotes && typeof project.groupNotes === "object" ? { ...project.groupNotes } : {};
   state.groupNicknames =
@@ -213,6 +216,7 @@ function clearSessionUi() {
   if (els.dateFrom) els.dateFrom.value = "";
   if (els.dateTo) els.dateTo.value = "";
   if (els.search) els.search.value = "";
+  if (els.tableSearch) els.tableSearch.value = "";
   if (els.filterCategory) els.filterCategory.value = "";
   if (els.filterDirection) els.filterDirection.value = "";
 }
@@ -263,7 +267,7 @@ function createProjectFromRows({
     updatedAt: new Date().toISOString(),
     ...emptyProjectFields({
       transactions: rows,
-      categories: categories?.length ? categories : defaultCategories(),
+      categories: Array.isArray(categories) ? categories : [],
       rules,
       groupNotes,
       groupNicknames,
@@ -332,7 +336,7 @@ function splitProjectBySources(project) {
       source: "import",
       fileName,
       rows: list.map((t) => ({ ...t })),
-      categories: defaultCategories(),
+      categories: [],
       rules: [],
       groupNotes: {},
       groupNicknames: {},
@@ -533,7 +537,7 @@ function getFiltered() {
   if (from) list = list.filter((t) => t.date && t.date >= from);
   if (to) list = list.filter((t) => t.date && t.date <= to);
   const cat = els.filterCategory.value;
-  if (cat === "__uncat") list = list.filter((t) => !t.category);
+  if (cat === "__uncat") list = list.filter((t) => !String(t.category || "").trim());
   else if (cat) list = list.filter((t) => t.category === cat);
   const dir = els.filterDirection.value;
   if (dir) list = list.filter((t) => t.direction === dir);
@@ -574,12 +578,21 @@ function updateStats(visible) {
 
 function refreshCategoryOptions() {
   const current = els.filterCategory.value;
-  els.categoryDatalist.innerHTML = state.categories
+  const fromTx = [
+    ...new Set(
+      state.transactions
+        .map((t) => String(t.category || "").trim())
+        .filter((c) => c && !isReservedCategoryName(c))
+    ),
+  ];
+  const merged = [...new Set([...(state.categories || []), ...fromTx])];
+  state.categories = merged;
+  els.categoryDatalist.innerHTML = merged
     .map((c) => `<option value="${escapeHtml(c)}"></option>`)
     .join("");
   els.filterCategory.innerHTML =
     `<option value="">ทุกกลุ่ม</option><option value="__uncat">ยังไม่มีกลุ่ม</option>` +
-    state.categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    merged.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
   if ([...els.filterCategory.options].some((o) => o.value === current)) {
     els.filterCategory.value = current;
   }
@@ -776,9 +789,32 @@ function renderGroupSummary() {
     })
     .join("");
 
+  const used = new Set(groups.map((g) => g.key));
+  const emptyCats = (state.categories || []).filter((c) => c && !used.has(c) && !isReservedCategoryName(c));
+  const emptyBody = emptyCats
+    .map(
+      (c) => `<tr class="is-empty-group" data-group="${escapeHtml(c)}">
+        <td>
+          <div class="group-title-row">
+            <span class="group-title-btn muted">${escapeHtml(c)}</span>
+            <button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(c)}" title="เปลี่ยนชื่อกลุ่ม">เปลี่ยนชื่อ</button>
+          </div>
+        </td>
+        <td class="num">0</td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="muted">กลุ่มว่าง</td>
+        <td class="group-actions">
+          <button type="button" class="btn quiet tiny" data-delete-group="${escapeHtml(c)}" title="ลบกลุ่มว่าง">ลบ</button>
+        </td>
+      </tr>`
+    )
+    .join("");
+
   const foot = `<tfoot>
     <tr class="group-total-row">
-      <td>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม)</td>
+      <td>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม${emptyCats.length ? ` · ว่าง ${emptyCats.length}` : ""})</td>
       <td class="num">${totals.count.toLocaleString("th-TH")}</td>
       <td class="num amount-in">${escapeHtml(formatMoney(totals.sumIn))}</td>
       <td class="num amount-out">${escapeHtml(formatMoney(totals.sumOut))}</td>
@@ -787,12 +823,12 @@ function renderGroupSummary() {
     </tr>
   </tfoot>`;
 
-  els.groupList.innerHTML = `<table class="group-table">${head}<tbody>${body}</tbody>${foot}</table>`;
+  els.groupList.innerHTML = `<table class="group-table">${head}<tbody>${body}${emptyBody}</tbody>${foot}</table>`;
 }
 
 function rowsForGroup(groupKey) {
   const base = getSummaryBase();
-  if (groupKey === "__uncat") return base.filter((t) => !t.category);
+  if (groupKey === "__uncat") return base.filter((t) => !String(t.category || "").trim());
   return base.filter((t) => t.category === groupKey);
 }
 
@@ -1018,8 +1054,9 @@ function renderTable() {
     .join("");
 
   if (els.checkAll) {
-    els.checkAll.checked = slice.length > 0 && slice.every((t) => selectedIds.has(t.id));
-    els.checkAll.indeterminate = slice.some((t) => selectedIds.has(t.id)) && !els.checkAll.checked;
+    els.checkAll.checked = visible.length > 0 && visible.every((t) => selectedIds.has(t.id));
+    els.checkAll.indeterminate =
+      visible.some((t) => selectedIds.has(t.id)) && !els.checkAll.checked;
   }
 
   if (visible.length > MAX) {
@@ -1033,20 +1070,67 @@ function scheduleRender() {
   searchTimer = setTimeout(renderTable, 100);
 }
 
+function followFilterAfterMove(prevCategories, nextCategory) {
+  const filter = els.filterCategory?.value;
+  if (!filter) return;
+  const leftFilter = [...prevCategories].some((c) => (c || "__uncat") === filter);
+  if (!leftFilter) return;
+  if (filter === "__uncat" && nextCategory) {
+    toast(`ติดกลุ่มแล้ว · แถวยังถูกซ่อนอยู่เพราะกรอง “ยังไม่มีกลุ่ม” — สลับตัวกรองได้ด้านบน`);
+    return;
+  }
+  if (nextCategory && filter !== nextCategory && filter !== "__uncat") {
+    els.filterCategory.value = nextCategory;
+    toast(`ย้ายไป “${nextCategory}” แล้ว · เปลี่ยนตัวกรองตามกลุ่มใหม่`);
+  }
+}
+
+function confirmAutoTag(category, preview) {
+  if (preview <= 0) return false;
+  const n = preview.toLocaleString("th-TH");
+  return window.confirm(
+    `พบ ${n} รายการที่ยังไม่มีกลุ่มและคล้ายกับที่เพิ่งติด\n\nต้องการติดกลุ่ม “${category}” ให้ด้วยไหม?\n\nกดยกเลิก = ติดเฉพาะที่เลือก/แก้ไว้แล้ว (ไม่สร้างกฎอัตโนมัติ)`
+  );
+}
+
+/** Build proposed rules from seed txs; preview extras; apply only if confirmed. */
+function learnRulesFromSeeds(seedTxs, category) {
+  if (!category || !seedTxs.length) return 0;
+  let proposed = state.rules.map((r) => ({ ...r }));
+  let useful = false;
+  for (const tx of seedTxs) {
+    const keywords = extractKeywords(tx.description);
+    if (!keywords.length) continue;
+    useful = true;
+    proposed = upsertRule(proposed, { keywords, category });
+  }
+  if (!useful) return 0;
+  const preview = previewApplyRules(state.transactions, proposed);
+  if (preview > 0 && !confirmAutoTag(category, preview)) return 0;
+  state.rules = proposed;
+  if (preview <= 0) return 0;
+  const applied = applyRules(state.transactions, state.rules);
+  state.transactions = applied.transactions;
+  state.rules = applied.rules;
+  return applied.applied;
+}
+
 function patchTx(id, patch, { learn = false, recordUndo = true, undoLabel = "แก้รายการ" } = {}) {
   const tx = state.transactions.find((t) => t.id === id);
   if (!tx) return;
   const before = recordUndo ? cloneStateSlice() : null;
+  const prevCat = tx.category || "";
   Object.assign(tx, patch);
   if (learn && patch.category) {
+    if (isReservedCategoryName(patch.category)) {
+      tx.category = prevCat;
+      toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
+      return;
+    }
     if (!state.categories.includes(patch.category)) state.categories.unshift(patch.category);
-    state.rules = upsertRule(state.rules, {
-      keywords: extractKeywords(tx.description),
-      category: patch.category,
-    });
-    const applied = applyRules(state.transactions, state.rules);
-    state.transactions = applied.transactions;
-    state.rules = applied.rules;
+    const auto = learnRulesFromSeeds([tx], patch.category);
+    if (auto > 0) toast(`ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")} รายการ`);
+    followFilterAfterMove([prevCat], patch.category);
   }
   if (recordUndo && before) pushUndo(undoLabel, before);
   schedulePersist();
@@ -1064,31 +1148,37 @@ function applyBulk() {
     toast("ใส่กลุ่มหรือ Note ก่อน");
     return;
   }
+  if (group && isReservedCategoryName(group)) {
+    toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
+    return;
+  }
   let n = 0;
+  let auto = 0;
+  const prevCats = [];
+  const seeds = [];
   withUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, () => {
     for (const id of selectedIds) {
       const tx = state.transactions.find((t) => t.id === id);
       if (!tx) continue;
+      prevCats.push(tx.category || "");
       if (group) {
         tx.category = group;
-        state.rules = upsertRule(state.rules, {
-          keywords: extractKeywords(tx.description),
-          category: group,
-        });
+        seeds.push(tx);
       }
       if (note !== "") tx.note = note;
       n += 1;
     }
     if (group && !state.categories.includes(group)) state.categories.unshift(group);
-    if (group) {
-      const applied = applyRules(state.transactions, state.rules);
-      state.transactions = applied.transactions;
-      state.rules = applied.rules;
-    }
+    if (group && seeds.length) auto = learnRulesFromSeeds(seeds, group);
   });
+  if (group) followFilterAfterMove(prevCats, group);
   schedulePersist();
   scheduleRender();
-  toast(`ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`);
+  toast(
+    auto > 0
+      ? `ใส่ให้ ${n.toLocaleString("th-TH")} ที่เลือก · ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")}`
+      : `ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`
+  );
 }
 
 function renameGroup(oldName, newName) {
@@ -1100,13 +1190,21 @@ function renameGroup(oldName, newName) {
     toast("ใส่ชื่อกลุ่มใหม่");
     return false;
   }
+  if (isReservedCategoryName(next)) {
+    toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
+    return false;
+  }
   if (next === prev) return false;
-  if (state.categories.includes(next)) {
-    toast("มีชื่อกลุ่มนี้แล้ว");
+  const nextBusy = state.transactions.some((t) => t.category === next);
+  if (nextBusy) {
+    toast("มีชื่อกลุ่มนี้แล้ว และมีรายการอยู่");
     return false;
   }
   withUndo(`เปลี่ยนชื่อกลุ่ม “${prev}”`, () => {
-    state.categories = state.categories.map((c) => (c === prev ? next : c));
+    const set = new Set(state.categories);
+    set.delete(prev);
+    set.add(next);
+    state.categories = [...set];
     for (const t of state.transactions) {
       if (t.category === prev) t.category = next;
     }
@@ -1127,6 +1225,27 @@ function renameGroup(oldName, newName) {
   scheduleRender();
   toast(`เปลี่ยนชื่อเป็น “${next}”`);
   return true;
+}
+
+function deleteEmptyGroup(groupKey) {
+  if (!requireLogin()) return;
+  const key = String(groupKey || "").trim();
+  if (!key || isReservedCategoryName(key)) return;
+  const count = state.transactions.filter((t) => t.category === key).length;
+  if (count > 0) {
+    toast(`ยังมี ${count.toLocaleString("th-TH")} รายการในกลุ่มนี้ — ย้ายออกก่อน`);
+    return;
+  }
+  withUndo(`ลบกลุ่มว่าง “${key}”`, () => {
+    state.categories = state.categories.filter((c) => c !== key);
+    delete state.groupNotes[key];
+    if (state.groupNicknames) delete state.groupNicknames[key];
+    state.rules = state.rules.filter((r) => r.category !== key);
+    if (els.filterCategory.value === key) els.filterCategory.value = "";
+  });
+  schedulePersist();
+  scheduleRender();
+  toast(`ลบกลุ่มว่าง “${key}” แล้ว`);
 }
 
 function beginRenameGroup(groupKey) {
@@ -1263,7 +1382,14 @@ function renameActiveProject() {
   toast(`ตั้งชื่อเป็น “${name}”`);
 }
 
-async function loadBundledDataFile({ jsonUrl, fileName, projectName }) {
+async function loadBundledDataFile({
+  jsonUrl,
+  fileName,
+  projectName,
+  starterCategories = null,
+  starterRuleSpecs = null,
+  applyStarterRules = false,
+}) {
   if (!requireLogin()) return null;
   const existing = workspace.projects.find(
     (p) => p.fileName === fileName || p.name === projectName || p.name === fileStem(fileName)
@@ -1290,13 +1416,29 @@ async function loadBundledDataFile({ jsonUrl, fileName, projectName }) {
     source: t.source || fileName,
   }));
   if (!rows.length) throw new Error(`ไม่พบรายการใน ${fileName}`);
+
+  let categories = Array.isArray(starterCategories) ? [...starterCategories] : [];
+  let rules = [];
+  if (Array.isArray(starterRuleSpecs) && starterRuleSpecs.length) {
+    for (const spec of starterRuleSpecs) {
+      rules = upsertRule(rules, { keywords: spec.keywords, category: spec.category });
+    }
+  }
+  let auto = 0;
+  if (applyStarterRules && rules.length) {
+    const applied = applyRules(rows, rules);
+    rows = applied.transactions;
+    rules = applied.rules;
+    auto = applied.applied;
+  }
+
   const project = createProjectFromRows({
     name: projectName || fileStem(fileName),
     source: "import",
     fileName,
     rows,
-    categories: defaultCategories(),
-    rules: [],
+    categories,
+    rules,
     groupNotes: {},
     groupNicknames: {},
     activate: true,
@@ -1304,7 +1446,11 @@ async function loadBundledDataFile({ jsonUrl, fileName, projectName }) {
   schedulePersist();
   renderProjectSelect();
   renderTable();
-  toast(`สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ`);
+  toast(
+    auto > 0
+      ? `สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ · ติดกลุ่มเริ่มต้น ${auto.toLocaleString("th-TH")}`
+      : `สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ`
+  );
   return project;
 }
 
@@ -1313,6 +1459,17 @@ async function openTellteaProject() {
     jsonUrl: "data/telltea_2024-2025.json",
     fileName: "telltea_2024-2025_full.pdf",
     projectName: "telltea_2024-2025",
+  });
+}
+
+async function openPeerlandProject() {
+  return loadBundledDataFile({
+    jsonUrl: "data/peerland_2024-2025.json",
+    fileName: "peerland_2024-2025_full.pdf",
+    projectName: "peerland_2024-2025",
+    starterCategories: PEERLAND_CATEGORIES,
+    starterRuleSpecs: PEERLAND_RULES,
+    applyStarterRules: true,
   });
 }
 
@@ -1362,7 +1519,7 @@ async function importFiles(fileList) {
         source: "import",
         fileName: file.name || baseName,
         rows,
-        categories: defaultCategories(),
+        categories: [],
         rules: [],
         groupNotes: {},
         groupNicknames: {},
@@ -1614,6 +1771,11 @@ function wireEvents() {
     if (!requireLogin()) return;
     const name = (els.newGroupName.value || "").trim();
     if (!name) return;
+    if (isReservedCategoryName(name)) {
+      toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
+      els.newGroupName.value = "";
+      return;
+    }
     if (state.categories.includes(name)) {
       toast("มีกลุ่มนี้อยู่แล้ว");
       els.newGroupName.value = "";
@@ -1626,7 +1788,7 @@ function wireEvents() {
     refreshCategoryOptions();
     els.newGroupName.value = "";
     renderGroupSummary();
-    toast(`เพิ่มกลุ่ม “${name}” แล้ว`);
+    toast(`เพิ่มกลุ่ม “${name}” แล้ว · ยังว่าง จนกว่าจะย้ายรายการเข้า`);
   });
 
   els.txBody.addEventListener("focusin", (e) => {
@@ -1705,6 +1867,11 @@ function wireEvents() {
       beginRenameGroup(renameBtn.getAttribute("data-rename-group"));
       return;
     }
+    const deleteBtn = e.target.closest("[data-delete-group]");
+    if (deleteBtn) {
+      deleteEmptyGroup(deleteBtn.getAttribute("data-delete-group"));
+      return;
+    }
     if (e.target.closest("[data-group-note]") || e.target.closest("[data-rename-form]")) return;
     const filterBtn = e.target.closest("[data-filter-group]");
     if (filterBtn) {
@@ -1759,7 +1926,7 @@ function wireEvents() {
   });
 
   els.checkAll?.addEventListener("change", () => {
-    const visible = getTableFiltered().slice(0, 500);
+    const visible = getTableFiltered();
     if (els.checkAll.checked) visible.forEach((t) => selectedIds.add(t.id));
     else visible.forEach((t) => selectedIds.delete(t.id));
     scheduleRender();
@@ -1819,6 +1986,7 @@ function wireEvents() {
   els.btnAuthHero?.addEventListener("click", handleAuthClick);
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }).catch((err) => toast(err.message)));
   els.btnOpenTelltea?.addEventListener("click", () => openTellteaProject().catch((err) => toast(err.message)));
+  els.btnOpenPeerland?.addEventListener("click", () => openPeerlandProject().catch((err) => toast(err.message)));
   els.btnRenameProject?.addEventListener("click", renameActiveProject);
   els.btnDeleteProject?.addEventListener("click", deleteActiveProject);
   els.fileInputHero?.addEventListener("change", (e) => {

@@ -39,10 +39,7 @@ export function makeProjectId() {
 function normalizeProject(raw, fallbackName = "โปรเจกต์") {
   const fields = emptyProjectFields({
     transactions: Array.isArray(raw?.transactions) ? raw.transactions : [],
-    categories:
-      Array.isArray(raw?.categories) && raw.categories.length
-        ? raw.categories
-        : [...DEFAULT_CATEGORIES],
+    categories: Array.isArray(raw?.categories) ? raw.categories : [...DEFAULT_CATEGORIES],
     rules: Array.isArray(raw?.rules) ? raw.rules : [],
     groupNotes: raw?.groupNotes && typeof raw.groupNotes === "object" ? raw.groupNotes : {},
     groupNicknames:
@@ -206,6 +203,65 @@ export function clearState() {
   localStorage.removeItem(WORKSPACE_KEY);
 }
 
+/** Common / transfer boilerplate that must not drive auto-tag alone. */
+const STOP_WORDS = new Set([
+  "และ", "หรือ", "จาก", "ไปยัง", "ไปที่", "โอน", "โอนไป", "เงิน", "ผ่าน", "ชำระ", "รายการ",
+  "บช", "บัญชี", "ธนาคาร", "กสิกร", "ไทยพาณิชย์", "กรุงไทย", "กรุงเทพ", "ออมทรัพย์",
+  "promptpay", "prompt", "pay", "transfer", "payment", "to", "from", "bank", "scb", "kbank",
+  "bbl", "ktb", "bay", "ttb", "ref", "trx", "txn", "fee", "xxxx", "xxxxxxx",
+  "ประจำเดือน", "สาขา", "internet", "mobile", "cash", "connect", "plus", "app", "แอปพลิ",
+  "โมบาย", "รับโอนเงิน", "โอนเงิน", "พร้อมเพย์", "หักบัญชีอัตโนมัติ", "รหัสอ้างอิง",
+  "ช่องทางรายการ", "เพื่อชำระ", "ตู้เติมเงิน", "รับโอนเงินผ่าน", "นาย", "นาง", "นางสาว",
+  "บจก", "บริษัท", "limited", "ltd", "the", "and", "for", "with",
+  "direct", "credit", "shop", "edc", "thai", "sale", "sales", "debit", "card",
+  "รับเงินจากการขายด้วย", "รับเงินจากการขาย", "โมบายแอปพลิ",
+]);
+
+const GENERIC_KEYWORDS = new Set([
+  ...STOP_WORDS,
+  "รับโอนเงิน",
+  "โอนเงิน",
+  "internet mobile",
+  "cash connect",
+  "cash connect plus",
+  "พร้อมเพย์",
+  "ตู้เติมเงิน",
+  "รับโอนเงินผ่าน",
+  "รับโอนเงิน ตู้เติมเงิน โมบาย แอปพลิ",
+]);
+
+export function isReservedCategoryName(name) {
+  const n = String(name || "").trim().toLowerCase();
+  return !n || n === "__uncat" || n === "ยังไม่มีกลุ่ม";
+}
+
+export function isGenericKeyword(keyword) {
+  const k = String(keyword || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!k || k.length < 3) return true;
+  if (GENERIC_KEYWORDS.has(k) || STOP_WORDS.has(k)) return true;
+  const parts = k.split(" ").filter(Boolean);
+  if (!parts.length) return true;
+  // Phrase is generic if every token is stop/generic or masked (x4576)
+  const allWeak = parts.every(
+    (p) => STOP_WORDS.has(p) || GENERIC_KEYWORDS.has(p) || /^x+\d*$/i.test(p) || /^\d+$/.test(p) || p.length < 3
+  );
+  return allWeak;
+}
+
+export function sanitizeRuleKeywords(keywords) {
+  return [...new Set(
+    (keywords || [])
+      .map((k) => String(k).toLowerCase().replace(/\s+/g, " ").trim())
+      .filter((k) => k.length >= 4)
+      .filter((k) => !isGenericKeyword(k))
+      // Drop weak 4-letter Latin stubs (shop, sale, card…) — keep longer merchants
+      .filter((k) => !(k.length < 5 && /^[a-z0-9]+$/i.test(k)))
+  )];
+}
+
 /** Extract memorable keywords from a description for auto-rules. */
 export function extractKeywords(description) {
   const text = String(description || "")
@@ -214,49 +270,40 @@ export function extractKeywords(description) {
     .replace(/\s+/g, " ")
     .trim();
 
-  const stop = new Set([
-    "และ", "หรือ", "จาก", "ไปยัง", "ไปที่", "โอน", "โอนไป", "เงิน", "ผ่าน", "ชำระ", "รายการ",
-    "บช", "บัญชี", "ธนาคาร", "กสิกร", "ไทยพาณิชย์", "กรุงไทย", "กรุงเทพ", "ออมทรัพย์",
-    "promptpay", "prompt", "pay", "transfer", "payment", "to", "from", "bank", "scb", "kbank",
-    "ref", "trx", "txn", "fee", "ค่าธรรมเนียม", "xxxx", "xxxxxxx", "ประจำเดือน", "สาขา",
-  ]);
-
   const tokens = text
     .split(" ")
     .map((t) => t.trim())
     .filter((t) => t.length >= 3)
     .filter((t) => !/^\d+$/.test(t))
-    .filter((t) => !/^x+$/i.test(t))
-    .filter((t) => !stop.has(t));
+    .filter((t) => !/^x+\d*$/i.test(t))
+    .filter((t) => !STOP_WORDS.has(t));
 
   const unique = [...new Set(tokens)];
   unique.sort((a, b) => b.length - a.length);
 
   // Prefer named entities / merchant-like tokens (letters+length)
-  const strong = unique.filter((t) => t.length >= 4 || /[a-z]/i.test(t));
-  const picks = (strong.length ? strong : unique).slice(0, 3);
+  const strong = unique.filter((t) => (t.length >= 5 || /[a-z]/i.test(t)) && !isGenericKeyword(t));
+  const picks = (strong.length ? strong : unique.filter((t) => !isGenericKeyword(t))).slice(0, 3);
 
-  // Multi-word phrase only if it avoids stop-word-only starts
+  // Multi-word phrase only if it keeps a non-generic token
   const phrases = text.match(/[\p{L}\p{N}\p{M}]{3,}(?:\s+[\p{L}\p{N}\p{M}]{3,})+/gu) || [];
   for (const phrase of phrases) {
     const cleaned = phrase
       .split(/\s+/)
-      .filter((w) => !stop.has(w) && [...w].length >= 3)
+      .filter((w) => !STOP_WORDS.has(w) && [...w].length >= 3 && !/^x+\d*$/i.test(w))
       .join(" ");
-    if ([...cleaned].length >= 5 && !picks.includes(cleaned)) {
+    if ([...cleaned].length >= 5 && !isGenericKeyword(cleaned) && !picks.includes(cleaned)) {
       picks.unshift(cleaned.slice(0, 48));
       break;
     }
   }
 
-  return [...new Set(picks)].slice(0, 3);
+  return sanitizeRuleKeywords(picks).slice(0, 3);
 }
 
 export function upsertRule(rules, { keywords, category }) {
-  const cleaned = (keywords || [])
-    .map((k) => String(k).toLowerCase().trim())
-    .filter((k) => k.length >= 3);
-  if (!cleaned.length || !category) return rules;
+  const cleaned = sanitizeRuleKeywords(keywords);
+  if (!cleaned.length || !category || isReservedCategoryName(category)) return rules;
   const key = cleaned.slice().sort().join("|") + "::" + category;
   const next = rules.filter((r) => r.key !== key);
   next.unshift({
@@ -275,20 +322,35 @@ export function matchRule(tx, rules) {
   let best = null;
   let bestScore = 0;
   for (const rule of rules) {
-    const hits = rule.keywords.filter((kw) => hay.includes(kw));
+    // Only specific keywords may trigger a match (ignore leftover generics in old rules).
+    const useful = sanitizeRuleKeywords(rule.keywords).sort((a, b) => b.length - a.length);
+    if (!useful.length) continue;
+    // Longest / primary keyword must match — blocks bloated rules with one broad token
+    const primary = useful[0];
+    if (!hay.includes(primary)) continue;
+    const hits = useful.filter((kw) => hay.includes(kw));
     if (!hits.length) continue;
-    // Require at least one strong keyword (>=4 chars) or all keywords matched
-    const hasStrong = hits.some((k) => k.length >= 4);
-    if (!hasStrong && hits.length < rule.keywords.length) continue;
+    const hasStrong = hits.some((k) => k.length >= 5 || /[a-z]{4,}/i.test(k));
+    if (!hasStrong) continue;
     let score = hits.reduce((s, kw) => s + Math.min(kw.length, 16), 0);
-    // Prefer more specific rules
     score += hits.length * 2;
+    score += Math.floor((hits.length / useful.length) * 6);
+    score += Math.min(primary.length, 12);
     if (score > bestScore) {
       bestScore = score;
-      best = rule;
+      best = { ...rule, keywords: useful };
     }
   }
-  return bestScore >= 5 ? best : null;
+  return bestScore >= 12 ? best : null;
+}
+
+export function previewApplyRules(transactions, rules) {
+  let applied = 0;
+  for (const tx of transactions) {
+    if (tx.category) continue;
+    if (matchRule(tx, rules)) applied += 1;
+  }
+  return applied;
 }
 
 export function applyRules(transactions, rules) {
