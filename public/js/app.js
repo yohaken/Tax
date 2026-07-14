@@ -36,6 +36,8 @@ let pendingDemo = false;
 const selectedIds = new Set();
 let tableSort = { key: "date", dir: "desc" };
 let groupSort = { key: "abs", dir: "desc" };
+let periodMode = "all"; // all | year:YYYY | custom
+let syncingPeriod = false;
 const undoStack = [];
 const MAX_UNDO = 40;
 const fieldBefore = new WeakMap();
@@ -80,6 +82,9 @@ const els = {
   resultLabel: document.getElementById("result-label"),
   categoryDatalist: document.getElementById("category-datalist"),
   groupList: document.getElementById("group-list"),
+  periodChips: document.getElementById("period-chips"),
+  periodRange: document.getElementById("period-range"),
+  btnPrintOverview: document.getElementById("btn-print-overview"),
   printRoot: document.getElementById("print-root"),
   checkAll: document.getElementById("check-all"),
   bulkCount: document.getElementById("bulk-count"),
@@ -293,6 +298,89 @@ function getSummaryBase() {
   return smartSearch(list, els.search.value).map((r) => r.item);
 }
 
+function dataDateBounds(list = state.transactions) {
+  const dates = list.map((t) => t.date).filter(Boolean).sort();
+  if (!dates.length) return null;
+  return { from: dates[0], to: dates[dates.length - 1] };
+}
+
+function availableYears() {
+  const years = new Set();
+  for (const t of state.transactions) {
+    if (!t.date || t.date.length < 4) continue;
+    const y = Number(t.date.slice(0, 4));
+    if (Number.isFinite(y)) years.add(y);
+  }
+  return [...years].sort((a, b) => a - b);
+}
+
+function periodLabelText() {
+  if (periodMode === "all") return "ทุกปีที่มีข้อมูล";
+  if (periodMode.startsWith("year:")) return `ปี ${periodMode.slice(5)}`;
+  return "ช่วงกำหนดเอง";
+}
+
+function updatePeriodRangeLabel(base = getSummaryBase()) {
+  if (!els.periodRange) return;
+  const bounds = dataDateBounds(base);
+  if (!bounds) {
+    els.periodRange.textContent = "ยังไม่มีข้อมูลในช่วงนี้";
+    return;
+  }
+  els.periodRange.textContent = `ข้อมูล ${formatDateTh(bounds.from)} – ${formatDateTh(bounds.to)} · ${periodLabelText()} · ${base.length.toLocaleString("th-TH")} รายการ`;
+}
+
+function renderPeriodChips() {
+  if (!els.periodChips) return;
+  const years = availableYears();
+  const chips = [
+    `<button type="button" class="period-chip${periodMode === "all" ? " is-active" : ""}" data-period="all">ทุกปี</button>`,
+    ...years.map(
+      (y) =>
+        `<button type="button" class="period-chip${periodMode === `year:${y}` ? " is-active" : ""}" data-period="year:${y}">${y}</button>`
+    ),
+    `<button type="button" class="period-chip${periodMode === "custom" ? " is-active" : ""}" data-period="custom">ช่วงเอง</button>`,
+  ];
+  els.periodChips.innerHTML = chips.join("");
+}
+
+function applyPeriodMode(mode, { render = true } = {}) {
+  periodMode = mode || "all";
+  syncingPeriod = true;
+  if (periodMode === "all") {
+    const bounds = dataDateBounds(state.transactions);
+    els.dateFrom.value = "";
+    els.dateTo.value = "";
+    // keep filters empty so "all data" — range label still shows actual min-max
+    void bounds;
+  } else if (periodMode.startsWith("year:")) {
+    const y = periodMode.slice(5);
+    els.dateFrom.value = `${y}-01-01`;
+    els.dateTo.value = `${y}-12-31`;
+  }
+  // custom: leave dateFrom/dateTo as user set; focus the filter dates
+  syncingPeriod = false;
+  renderPeriodChips();
+  if (render) scheduleRender();
+  if (periodMode === "custom") {
+    els.dateFrom?.focus();
+  }
+}
+
+function syncPeriodFromDateFilters() {
+  if (syncingPeriod) return;
+  const from = els.dateFrom.value;
+  const to = els.dateTo.value;
+  if (!from && !to) {
+    periodMode = "all";
+  } else if (/^\d{4}-01-01$/.test(from) && /^\d{4}-12-31$/.test(to) && from.slice(0, 4) === to.slice(0, 4)) {
+    periodMode = `year:${from.slice(0, 4)}`;
+  } else {
+    periodMode = "custom";
+  }
+  renderPeriodChips();
+}
+
 function groupSortMarker(key) {
   if (groupSort.key !== key) return "";
   return groupSort.dir === "asc" ? " ↑" : " ↓";
@@ -319,33 +407,52 @@ function sortGroups(groups) {
   });
 }
 
+function groupTotals(groups) {
+  return groups.reduce(
+    (acc, g) => {
+      acc.count += g.count || 0;
+      acc.sumIn += g.sumIn || 0;
+      acc.sumOut += g.sumOut || 0;
+      acc.net += g.net || 0;
+      return acc;
+    },
+    { count: 0, sumIn: 0, sumOut: 0, net: 0 }
+  );
+}
+
 function renderGroupSummary() {
   if (!els.groupList) return;
-  const groups = sortGroups(summarizeByGroup(getSummaryBase()));
+  renderPeriodChips();
+  const base = getSummaryBase();
+  updatePeriodRangeLabel(base);
+  const groups = sortGroups(summarizeByGroup(base));
   const active = els.filterCategory.value || "";
 
   if (!groups.length) {
-    els.groupList.innerHTML = `<div class="group-meta">ยังไม่มีรายการให้สรุป</div>`;
+    els.groupList.innerHTML = `<div class="group-meta">ยังไม่มีรายการให้สรุปในช่วงนี้</div>`;
     return;
   }
 
-  const head = `<div class="group-row group-head" role="row">
-    <div class="group-name">
-      <button type="button" class="th-sort${groupSort.key === "name" ? " is-active" : ""}" data-group-sort="name">กลุ่ม${groupSortMarker("name")}</button>
-    </div>
-    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "in" ? " is-active" : ""}" data-group-sort="in">เข้า${groupSortMarker("in")}</button></div>
-    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "out" ? " is-active" : ""}" data-group-sort="out">ออก${groupSortMarker("out")}</button></div>
-    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "net" ? " is-active" : ""}" data-group-sort="net">สุทธิ${groupSortMarker("net")}</button></div>
-    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "note" ? " is-active" : ""}" data-group-sort="note">Note${groupSortMarker("note")}</button></div>
-    <div class="group-actions" aria-hidden="true"></div>
-  </div>`;
+  const totals = groupTotals(groups);
+  const head = `
+    <thead>
+      <tr>
+        <th><button type="button" class="th-sort${groupSort.key === "name" ? " is-active" : ""}" data-group-sort="name">กลุ่ม${groupSortMarker("name")}</button></th>
+        <th class="num"><button type="button" class="th-sort${groupSort.key === "count" ? " is-active" : ""}" data-group-sort="count">จำนวน${groupSortMarker("count")}</button></th>
+        <th class="num"><button type="button" class="th-sort${groupSort.key === "in" ? " is-active" : ""}" data-group-sort="in">เงินเข้า${groupSortMarker("in")}</button></th>
+        <th class="num"><button type="button" class="th-sort${groupSort.key === "out" ? " is-active" : ""}" data-group-sort="out">เงินออก${groupSortMarker("out")}</button></th>
+        <th class="num"><button type="button" class="th-sort${groupSort.key === "net" ? " is-active" : ""}" data-group-sort="net">สุทธิ${groupSortMarker("net")}</button></th>
+        <th><button type="button" class="th-sort${groupSort.key === "note" ? " is-active" : ""}" data-group-sort="note">Note${groupSortMarker("note")}</button></th>
+        <th class="col-actions">จัดการ</th>
+      </tr>
+    </thead>`;
 
-  const rows = groups
+  const body = groups
     .map((g) => {
       const isActive = active === g.key;
       const gNote = state.groupNotes?.[g.key] || "";
-      return `<article class="group-row${isActive ? " is-active" : ""}" data-group="${escapeHtml(g.key)}">
-        <div class="group-name">
+      return `<tr class="${isActive ? "is-active" : ""}" data-group="${escapeHtml(g.key)}">
+        <td>
           <div class="group-title-row">
             <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}">${escapeHtml(g.name)}</button>
             ${
@@ -354,24 +461,35 @@ function renderGroupSummary() {
                 : `<button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(g.key)}" title="แก้ชื่อกลุ่ม">แก้ชื่อ</button>`
             }
           </div>
-          <div class="group-meta">${g.count.toLocaleString("th-TH")} รายการ${g.notePreview ? ` · Note: ${escapeHtml(g.notePreview)}` : ""}</div>
-        </div>
-        <div class="group-amt in"><small>เข้า</small>${escapeHtml(formatMoney(g.sumIn))}</div>
-        <div class="group-amt out"><small>ออก</small>${escapeHtml(formatMoney(g.sumOut))}</div>
-        <div class="group-amt"><small>สุทธิ</small>${escapeHtml(formatMoney(g.net))}</div>
-        <div class="group-amt group-note-cell">
+        </td>
+        <td class="num">${g.count.toLocaleString("th-TH")}</td>
+        <td class="num amount-in">${escapeHtml(formatMoney(g.sumIn))}</td>
+        <td class="num amount-out">${escapeHtml(formatMoney(g.sumOut))}</td>
+        <td class="num">${escapeHtml(formatMoney(g.net))}</td>
+        <td class="group-note-cell">
           <input class="group-note" data-group-note="${escapeHtml(g.key)}" value="${escapeHtml(gNote)}" placeholder="Note กลุ่ม…" />
-        </div>
-        <div class="group-actions">
-          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}">ดูกลุ่ม</button>
+        </td>
+        <td class="group-actions">
+          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}">ดู</button>
           <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}">Export</button>
-          <button type="button" class="btn solid tiny" data-print-group="${escapeHtml(g.key)}">พิมพ์กลุ่มนี้</button>
-        </div>
-      </article>`;
+          <button type="button" class="btn quiet tiny" data-print-group="${escapeHtml(g.key)}">พิมพ์</button>
+        </td>
+      </tr>`;
     })
     .join("");
 
-  els.groupList.innerHTML = head + rows;
+  const foot = `<tfoot>
+    <tr class="group-total-row">
+      <td>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม)</td>
+      <td class="num">${totals.count.toLocaleString("th-TH")}</td>
+      <td class="num amount-in">${escapeHtml(formatMoney(totals.sumIn))}</td>
+      <td class="num amount-out">${escapeHtml(formatMoney(totals.sumOut))}</td>
+      <td class="num">${escapeHtml(formatMoney(totals.net))}</td>
+      <td colspan="2"></td>
+    </tr>
+  </tfoot>`;
+
+  els.groupList.innerHTML = `<table class="group-table">${head}<tbody>${body}</tbody>${foot}</table>`;
 }
 
 function rowsForGroup(groupKey) {
@@ -396,12 +514,17 @@ function printGroup(groupKey) {
   const sumIn = rows.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
   const sumOut = rows.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
   const gNote = state.groupNotes?.[groupKey] || "";
+  const bounds = dataDateBounds(rows);
+  const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
 
   els.printRoot.hidden = false;
   els.printRoot.innerHTML = `
     <h1>TaxTag · ${escapeHtml(groupTitle(groupKey))}</h1>
-    <p class="print-sub">${rows.length.toLocaleString("th-TH")} รายการ
-      · เข้า ${escapeHtml(formatMoney(sumIn))}
+    <p class="print-sub">${periodLabelText()}
+      ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
+      · ${rows.length.toLocaleString("th-TH")} รายการ
+      · พิมพ์ ${escapeHtml(printedAt)}
+      <br/>เข้า ${escapeHtml(formatMoney(sumIn))}
       · ออก ${escapeHtml(formatMoney(sumOut))}
       · สุทธิ ${escapeHtml(formatMoney(sumIn - sumOut))}
       ${gNote ? `<br/>Note กลุ่ม: ${escapeHtml(gNote)}` : ""}
@@ -423,6 +546,72 @@ function printGroup(groupKey) {
       </tbody>
     </table>
     <p class="totals">รวมเข้า ${escapeHtml(formatMoney(sumIn))} · รวมออก ${escapeHtml(formatMoney(sumOut))} · สุทธิ ${escapeHtml(formatMoney(sumIn - sumOut))}</p>
+  `;
+  window.print();
+  setTimeout(() => {
+    els.printRoot.hidden = true;
+    els.printRoot.innerHTML = "";
+  }, 300);
+}
+
+function printOverview() {
+  if (!requireLogin()) return;
+  const base = getSummaryBase();
+  const groups = sortGroups(summarizeByGroup(base));
+  if (!groups.length) {
+    toast("ยังไม่มีรายการให้สรุป");
+    return;
+  }
+  const totals = groupTotals(groups);
+  const bounds = dataDateBounds(base);
+  const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
+
+  els.printRoot.hidden = false;
+  els.printRoot.innerHTML = `
+    <h1>TaxTag · สรุปตามกลุ่ม</h1>
+    <p class="print-sub">สำหรับเสนอภาพรวมแยกกลุ่ม
+      <br/>${escapeHtml(periodLabelText())}
+      ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
+      · ${base.length.toLocaleString("th-TH")} รายการ
+      · พิมพ์ ${escapeHtml(printedAt)}
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>กลุ่ม</th>
+          <th class="num">จำนวน</th>
+          <th class="num">เงินเข้า</th>
+          <th class="num">เงินออก</th>
+          <th class="num">สุทธิ</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${groups
+          .map((g) => {
+            const gNote = state.groupNotes?.[g.key] || "";
+            return `<tr>
+              <td>${escapeHtml(g.name)}</td>
+              <td class="num">${g.count.toLocaleString("th-TH")}</td>
+              <td class="num">${escapeHtml(formatMoney(g.sumIn))}</td>
+              <td class="num">${escapeHtml(formatMoney(g.sumOut))}</td>
+              <td class="num">${escapeHtml(formatMoney(g.net))}</td>
+              <td>${escapeHtml(gNote)}</td>
+            </tr>`;
+          })
+          .join("")}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td><strong>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม)</strong></td>
+          <td class="num"><strong>${totals.count.toLocaleString("th-TH")}</strong></td>
+          <td class="num"><strong>${escapeHtml(formatMoney(totals.sumIn))}</strong></td>
+          <td class="num"><strong>${escapeHtml(formatMoney(totals.sumOut))}</strong></td>
+          <td class="num"><strong>${escapeHtml(formatMoney(totals.net))}</strong></td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
   `;
   window.print();
   setTimeout(() => {
@@ -632,12 +821,12 @@ function renameGroup(oldName, newName) {
 
 function beginRenameGroup(groupKey) {
   if (!groupKey || groupKey === "__uncat") return;
-  const article = [...(els.groupList?.querySelectorAll("[data-group]") || [])].find(
+  const row = [...(els.groupList?.querySelectorAll("[data-group]") || [])].find(
     (el) => el.getAttribute("data-group") === groupKey
   );
-  const row = article?.querySelector(".group-name");
-  if (!row || row.querySelector("[data-rename-form]")) return;
-  const titleRow = row.querySelector(".group-title-row");
+  const cell = row?.querySelector("td");
+  if (!cell || cell.querySelector("[data-rename-form]")) return;
+  const titleRow = cell.querySelector(".group-title-row");
   if (!titleRow) return;
   titleRow.hidden = true;
   const form = document.createElement("form");
@@ -648,7 +837,7 @@ function beginRenameGroup(groupKey) {
     <button type="submit" class="btn solid tiny">บันทึก</button>
     <button type="button" class="btn quiet tiny" data-rename-cancel>ยกเลิก</button>
   `;
-  row.insertBefore(form, row.querySelector(".group-meta"));
+  cell.appendChild(form);
   const input = form.querySelector("input");
   input.focus();
   input.select();
@@ -930,11 +1119,25 @@ function wireEvents() {
 
   ["input", "change"].forEach((evt) => {
     els.search.addEventListener(evt, scheduleRender);
-    els.dateFrom.addEventListener(evt, scheduleRender);
-    els.dateTo.addEventListener(evt, scheduleRender);
+    els.dateFrom.addEventListener(evt, () => {
+      syncPeriodFromDateFilters();
+      scheduleRender();
+    });
+    els.dateTo.addEventListener(evt, () => {
+      syncPeriodFromDateFilters();
+      scheduleRender();
+    });
     els.filterCategory.addEventListener(evt, scheduleRender);
     els.filterDirection.addEventListener(evt, scheduleRender);
   });
+
+  els.periodChips?.addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-period]");
+    if (!chip) return;
+    applyPeriodMode(chip.getAttribute("data-period"));
+  });
+
+  els.btnPrintOverview?.addEventListener("click", printOverview);
 
   els.btnClearSearch?.addEventListener("click", () => {
     els.search.value = "";

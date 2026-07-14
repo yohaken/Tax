@@ -86,10 +86,19 @@
 
       <section class="group-summary" id="group-summary" aria-label="สรุปตามกลุ่ม">
         <div class="group-summary-head">
-          <h2>สรุปตามกลุ่ม</h2>
-          <p>คลิกหัวคอลัมน์เพื่อเรียง · แก้ชื่อกลุ่ม / Note ได้</p>
+          <div class="group-summary-title">
+            <h2>สรุปตามกลุ่ม</h2>
+            <div class="period-bar" id="period-bar" aria-label="เลือกช่วงเวลา">
+              <span class="period-label">ช่วง</span>
+              <div class="period-chips" id="period-chips"></div>
+            </div>
+            <p class="period-range" id="period-range">ยังไม่มีข้อมูล</p>
+          </div>
+          <div class="group-summary-actions">
+            <button type="button" class="btn solid tiny" id="btn-print-overview" title="พิมพ์ตารางสรุปสำหรับเสนอภาพรวม">พิมพ์สรุปทุกกลุ่ม</button>
+          </div>
         </div>
-        <div class="group-list" id="group-list"></div>
+        <div class="group-table-wrap" id="group-list"></div>
       </section>
 
       <div class="bulk-bar" id="bulk-bar">
