@@ -115,6 +115,7 @@ export async function pullCloudState(uid) {
     categories: Array.isArray(data.categories) ? data.categories : [],
     rules: Array.isArray(data.rules) ? data.rules : [],
     groupNotes: data.groupNotes && typeof data.groupNotes === "object" ? data.groupNotes : {},
+    projectSource: typeof data.projectSource === "string" ? data.projectSource : "",
     updatedAt: data.updatedAt || null,
   };
 }
@@ -127,6 +128,7 @@ export async function pushCloudState(uid, state) {
       categories: state.categories || [],
       rules: state.rules || [],
       groupNotes: state.groupNotes || {},
+      projectSource: state.projectSource || "",
       updatedAt: serverTimestamp(),
       ownerEmail: ALLOWED_EMAIL,
     },

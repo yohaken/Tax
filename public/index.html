@@ -22,6 +22,8 @@
     <div class="top-actions">
       <button type="button" class="btn solid" id="btn-auth">เข้าสู่ระบบ Google</button>
       <div class="auth-only is-hidden" id="auth-tools">
+        <button type="button" class="btn quiet" id="btn-undo" disabled title="เลิกทำ (Ctrl+Z)">เลิกทำ</button>
+        <button type="button" class="btn quiet" id="btn-reload-project" title="ล้างแท็ก/Note แล้วอ่านไฟล์โปรเจกต์ใหม่ทั้งหมด">เคลียร์อ่านใหม่</button>
         <button type="button" class="btn quiet" id="btn-peerland">Peerland</button>
         <label class="btn quiet file-btn" for="file-input">
           นำเข้า
@@ -85,7 +87,7 @@
       <section class="group-summary" id="group-summary" aria-label="สรุปตามกลุ่ม">
         <div class="group-summary-head">
           <h2>สรุปตามกลุ่ม</h2>
-          <p>คลิกหัวคอลัมน์เพื่อเรียง · Note กลุ่มแก้ได้</p>
+          <p>คลิกหัวคอลัมน์เพื่อเรียง · แก้ชื่อกลุ่ม / Note ได้</p>
         </div>
         <div class="group-list" id="group-list"></div>
       </section>

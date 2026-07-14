@@ -23,6 +23,7 @@ export function loadState() {
         categories: [...DEFAULT_CATEGORIES],
         rules: [],
         groupNotes: {},
+        projectSource: "",
       };
     }
     const data = JSON.parse(raw);
@@ -33,6 +34,7 @@ export function loadState() {
         : [...DEFAULT_CATEGORIES],
       rules: Array.isArray(data.rules) ? data.rules : [],
       groupNotes: data.groupNotes && typeof data.groupNotes === "object" ? data.groupNotes : {},
+      projectSource: typeof data.projectSource === "string" ? data.projectSource : "",
     };
   } catch {
     return {
@@ -40,6 +42,7 @@ export function loadState() {
       categories: [...DEFAULT_CATEGORIES],
       rules: [],
       groupNotes: {},
+      projectSource: "",
     };
   }
 }
@@ -52,6 +55,7 @@ export function saveState(state) {
       categories: state.categories,
       rules: state.rules,
       groupNotes: state.groupNotes || {},
+      projectSource: state.projectSource || "",
       savedAt: new Date().toISOString(),
     })
   );

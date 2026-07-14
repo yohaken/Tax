@@ -23,6 +23,7 @@ import {
 
 const state = loadState();
 if (!state.groupNotes) state.groupNotes = {};
+if (!state.projectSource) state.projectSource = "";
 
 let currentUser = null;
 let cloudReady = false;
@@ -35,6 +36,31 @@ let pendingDemo = false;
 const selectedIds = new Set();
 let tableSort = { key: "date", dir: "desc" };
 let groupSort = { key: "abs", dir: "desc" };
+const undoStack = [];
+const MAX_UNDO = 40;
+const fieldBefore = new WeakMap();
+
+const PEERLAND_CATEGORIES = [
+  "รายได้ลูกค้า / QR",
+  "Shopee / Lazada",
+  "ชำระบัตรกสิกร",
+  "โอนภายใน / ส่วนตัว",
+  "ค่าธรรมเนียม",
+  "สินค้า / ซูเปอร์มาร์เก็ต",
+  "หลักทรัพย์ / ออม",
+  "อื่นๆ",
+];
+
+const PEERLAND_RULES = [
+  { keywords: ["ช้อปปี้เพย์", "shopee"], category: "Shopee / Lazada" },
+  { keywords: ["lazada"], category: "Shopee / Lazada" },
+  { keywords: ["บัตรกสิกรไทย"], category: "ชำระบัตรกสิกร" },
+  { keywords: ["ค่าธรรมเนียม"], category: "ค่าธรรมเนียม" },
+  { keywords: ["my qr", "รับโอนเงินผ่าน qr"], category: "รายได้ลูกค้า / QR" },
+  { keywords: ["ซีพี แอ็กซ์ตร้า", "cp axtra"], category: "สินค้า / ซูเปอร์มาร์เก็ต" },
+  { keywords: ["ksecurities", "หลักทรัพย์"], category: "หลักทรัพย์ / ออม" },
+  { keywords: ["phiraphong yohakh", "พีระพงษ์ โยหาเ"], category: "โอนภายใน / ส่วนตัว" },
+];
 
 const els = {
   loginGate: document.getElementById("login-gate"),
@@ -62,6 +88,8 @@ const els = {
   btnBulkApply: document.getElementById("btn-bulk-apply"),
   btnBulkClear: document.getElementById("btn-bulk-clear"),
   btnExport: document.getElementById("btn-export"),
+  btnUndo: document.getElementById("btn-undo"),
+  btnReloadProject: document.getElementById("btn-reload-project"),
   btnAuth: document.getElementById("btn-auth"),
   btnAuthHero: document.getElementById("btn-auth-hero"),
   btnPeerland: document.getElementById("btn-peerland"),
@@ -94,6 +122,70 @@ function toast(message) {
 
 function setSync(text) {
   if (els.syncStatus) els.syncStatus.textContent = text;
+}
+
+function cloneStateSlice() {
+  return {
+    transactions: state.transactions.map((t) => ({ ...t })),
+    categories: [...state.categories],
+    rules: state.rules.map((r) => ({
+      ...r,
+      keywords: Array.isArray(r.keywords) ? [...r.keywords] : r.keywords,
+    })),
+    groupNotes: { ...(state.groupNotes || {}) },
+    projectSource: state.projectSource || "",
+  };
+}
+
+function applyStateSlice(slice) {
+  state.transactions = slice.transactions.map((t) => ({ ...t }));
+  state.categories = [...slice.categories];
+  state.rules = slice.rules.map((r) => ({
+    ...r,
+    keywords: Array.isArray(r.keywords) ? [...r.keywords] : r.keywords,
+  }));
+  state.groupNotes = { ...(slice.groupNotes || {}) };
+  state.projectSource = slice.projectSource || "";
+}
+
+function updateUndoButton() {
+  if (!els.btnUndo) return;
+  const top = undoStack[undoStack.length - 1];
+  els.btnUndo.disabled = !top;
+  els.btnUndo.title = top ? `เลิกทำ: ${top.label} (Ctrl+Z)` : "เลิกทำ (Ctrl+Z)";
+  els.btnUndo.textContent = top ? `เลิกทำ` : "เลิกทำ";
+}
+
+function pushUndo(label, beforeSlice) {
+  undoStack.push({ label, before: beforeSlice });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoButton();
+}
+
+function withUndo(label, mutator) {
+  const before = cloneStateSlice();
+  mutator();
+  pushUndo(label, before);
+}
+
+function undoLast() {
+  if (!requireLogin()) return;
+  const entry = undoStack.pop();
+  updateUndoButton();
+  if (!entry) {
+    toast("ไม่มีอะไรให้เลิกทำ");
+    return;
+  }
+  applyStateSlice(entry.before);
+  selectedIds.clear();
+  schedulePersist();
+  scheduleRender();
+  toast(`เลิกทำ: ${entry.label}`);
+}
+
+function rememberField(el) {
+  if (!el) return;
+  fieldBefore.set(el, el.value);
 }
 
 function escapeHtml(str) {
@@ -254,7 +346,14 @@ function renderGroupSummary() {
       const gNote = state.groupNotes?.[g.key] || "";
       return `<article class="group-row${isActive ? " is-active" : ""}" data-group="${escapeHtml(g.key)}">
         <div class="group-name">
-          <button type="button" data-filter-group="${escapeHtml(g.key)}">${escapeHtml(g.name)}</button>
+          <div class="group-title-row">
+            <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}">${escapeHtml(g.name)}</button>
+            ${
+              g.key === "__uncat"
+                ? ""
+                : `<button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(g.key)}" title="แก้ชื่อกลุ่ม">แก้ชื่อ</button>`
+            }
+          </div>
           <div class="group-meta">${g.count.toLocaleString("th-TH")} รายการ${g.notePreview ? ` · Note: ${escapeHtml(g.notePreview)}` : ""}</div>
         </div>
         <div class="group-amt in"><small>เข้า</small>${escapeHtml(formatMoney(g.sumIn))}</div>
@@ -439,9 +538,10 @@ function scheduleRender() {
   searchTimer = setTimeout(renderTable, 100);
 }
 
-function patchTx(id, patch, { learn = false } = {}) {
+function patchTx(id, patch, { learn = false, recordUndo = true, undoLabel = "แก้รายการ" } = {}) {
   const tx = state.transactions.find((t) => t.id === id);
   if (!tx) return;
+  const before = recordUndo ? cloneStateSlice() : null;
   Object.assign(tx, patch);
   if (learn && patch.category) {
     if (!state.categories.includes(patch.category)) state.categories.unshift(patch.category);
@@ -453,6 +553,7 @@ function patchTx(id, patch, { learn = false } = {}) {
     state.transactions = applied.transactions;
     state.rules = applied.rules;
   }
+  if (recordUndo && before) pushUndo(undoLabel, before);
   schedulePersist();
 }
 
@@ -464,19 +565,137 @@ function applyBulk() {
   }
   const group = (els.bulkGroup.value || "").trim();
   const note = els.bulkNote.value;
-  let n = 0;
-  for (const id of selectedIds) {
-    const patch = {};
-    if (group) patch.category = group;
-    if (note !== "") patch.note = note;
-    if (!Object.keys(patch).length) continue;
-    patchTx(id, patch, { learn: Boolean(group) });
-    n += 1;
+  if (!group && note === "") {
+    toast("ใส่กลุ่มหรือ Note ก่อน");
+    return;
   }
-  if (group && !state.categories.includes(group)) state.categories.unshift(group);
+  let n = 0;
+  withUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, () => {
+    for (const id of selectedIds) {
+      const tx = state.transactions.find((t) => t.id === id);
+      if (!tx) continue;
+      if (group) {
+        tx.category = group;
+        state.rules = upsertRule(state.rules, {
+          keywords: extractKeywords(tx.description),
+          category: group,
+        });
+      }
+      if (note !== "") tx.note = note;
+      n += 1;
+    }
+    if (group && !state.categories.includes(group)) state.categories.unshift(group);
+    if (group) {
+      const applied = applyRules(state.transactions, state.rules);
+      state.transactions = applied.transactions;
+      state.rules = applied.rules;
+    }
+  });
   schedulePersist();
   scheduleRender();
   toast(`ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`);
+}
+
+function renameGroup(oldName, newName) {
+  if (!requireLogin()) return false;
+  const next = String(newName || "").trim();
+  const prev = String(oldName || "").trim();
+  if (!prev || prev === "__uncat") return false;
+  if (!next) {
+    toast("ใส่ชื่อกลุ่มใหม่");
+    return false;
+  }
+  if (next === prev) return false;
+  if (state.categories.includes(next)) {
+    toast("มีชื่อกลุ่มนี้แล้ว");
+    return false;
+  }
+  withUndo(`เปลี่ยนชื่อกลุ่ม “${prev}”`, () => {
+    state.categories = state.categories.map((c) => (c === prev ? next : c));
+    for (const t of state.transactions) {
+      if (t.category === prev) t.category = next;
+    }
+    for (const r of state.rules) {
+      if (r.category === prev) r.category = next;
+    }
+    if (Object.prototype.hasOwnProperty.call(state.groupNotes, prev)) {
+      state.groupNotes[next] = state.groupNotes[prev];
+      delete state.groupNotes[prev];
+    }
+    if (els.filterCategory.value === prev) els.filterCategory.value = next;
+  });
+  schedulePersist();
+  scheduleRender();
+  toast(`เปลี่ยนชื่อเป็น “${next}”`);
+  return true;
+}
+
+function beginRenameGroup(groupKey) {
+  if (!groupKey || groupKey === "__uncat") return;
+  const row = els.groupList?.querySelector(`[data-group="${CSS.escape(groupKey)}"] .group-name`);
+  if (!row || row.querySelector("[data-rename-form]")) return;
+  const titleRow = row.querySelector(".group-title-row");
+  if (!titleRow) return;
+  titleRow.hidden = true;
+  const form = document.createElement("form");
+  form.className = "rename-form";
+  form.setAttribute("data-rename-form", groupKey);
+  form.innerHTML = `
+    <input type="text" value="${escapeHtml(groupKey)}" maxlength="60" aria-label="ชื่อกลุ่มใหม่" required />
+    <button type="submit" class="btn solid tiny">บันทึก</button>
+    <button type="button" class="btn quiet tiny" data-rename-cancel>ยกเลิก</button>
+  `;
+  row.insertBefore(form, row.querySelector(".group-meta"));
+  const input = form.querySelector("input");
+  input.focus();
+  input.select();
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    renameGroup(groupKey, input.value);
+  });
+  form.querySelector("[data-rename-cancel]")?.addEventListener("click", () => {
+    form.remove();
+    titleRow.hidden = false;
+  });
+}
+
+function detectProjectSource() {
+  if (state.projectSource === "peerland" || state.projectSource === "demo") return state.projectSource;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("peerland") === "1") return "peerland";
+  if (params.get("demo") === "1") return "demo";
+  const peerlandHits = state.transactions.filter((t) =>
+    String(t.source || "").includes("peerland")
+  ).length;
+  if (peerlandHits > state.transactions.length / 2) return "peerland";
+  return state.projectSource || "";
+}
+
+async function reloadProjectFresh() {
+  if (!requireLogin()) return;
+  const source = detectProjectSource() || "peerland";
+  const label =
+    source === "demo"
+      ? "ตัวอย่างสั้น"
+      : source === "peerland"
+        ? "Peerland 2024–2025"
+        : "โปรเจกต์นี้";
+  const ok = window.confirm(
+    `เคลียร์แท็ก / Note / กฎ แล้วอ่านไฟล์ “${label}” ใหม่ทั้งหมด?\n\nกดเลิกทำได้ถ้าเพิ่งกดพลาด`
+  );
+  if (!ok) return;
+  const before = cloneStateSlice();
+  try {
+    if (source === "demo") await startDemo({ replace: true, fresh: true, recordUndo: false });
+    else await startPeerland({ replace: true, fresh: true, recordUndo: false });
+    pushUndo(`เคลียร์อ่านใหม่ (${label})`, before);
+    toast(`อ่าน “${label}” ใหม่แล้ว · กดเลิกทำได้`);
+  } catch (err) {
+    applyStateSlice(before);
+    schedulePersist();
+    scheduleRender();
+    toast(err.message || "อ่านไฟล์ใหม่ไม่สำเร็จ");
+  }
 }
 
 async function importFiles(fileList) {
@@ -498,28 +717,53 @@ async function importFiles(fileList) {
     toast("ไม่พบรายการในไฟล์");
     return;
   }
-  state.transactions = dedupeTransactions([...imported, ...state.transactions]);
-  const applied = applyRules(state.transactions, state.rules);
-  state.transactions = applied.transactions;
-  state.rules = applied.rules;
+  withUndo(`นำเข้า ${imported.length.toLocaleString("th-TH")} รายการ`, () => {
+    state.transactions = dedupeTransactions([...imported, ...state.transactions]);
+    const applied = applyRules(state.transactions, state.rules);
+    state.transactions = applied.transactions;
+    state.rules = applied.rules;
+    if (!state.projectSource) state.projectSource = "import";
+  });
   schedulePersist();
   renderTable();
   toast(`นำเข้า ${imported.length.toLocaleString("th-TH")} รายการ`);
 }
 
-async function startDemo({ replace = true } = {}) {
+async function startDemo({ replace = true, fresh = false, recordUndo = true } = {}) {
   if (!requireLogin()) return;
   const res = await fetch(new URL("sample-statement.csv", window.location.href));
   if (!res.ok) throw new Error("โหลดตัวอย่างไม่สำเร็จ");
   const text = await res.text();
-  if (replace) {
-    state.transactions = [];
-    state.rules = [];
+  const run = async () => {
+    if (replace || fresh) {
+      state.transactions = [];
+      state.rules = [];
+    }
+    if (fresh) state.groupNotes = {};
+    state.projectSource = "demo";
+    const parsed = await parseFile(new File([text], "sample-statement.csv", { type: "text/csv" }));
+    state.transactions = dedupeTransactions([...parsed, ...state.transactions]);
+    const applied = applyRules(state.transactions, state.rules);
+    state.transactions = applied.transactions;
+    state.rules = applied.rules;
+  };
+  if (recordUndo) {
+    const before = cloneStateSlice();
+    await run();
+    pushUndo("โหลดตัวอย่างสั้น", before);
+  } else {
+    await run();
   }
-  await importFiles([new File([text], "sample-statement.csv", { type: "text/csv" })]);
+  schedulePersist();
+  renderTable();
+  const params = new URLSearchParams(window.location.search);
+  params.set("demo", "1");
+  params.delete("peerland");
+  window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+  toast(`โหลดตัวอย่าง ${state.transactions.length.toLocaleString("th-TH")} รายการ`);
 }
 
-async function startPeerland({ replace = true } = {}) {
+async function startPeerland({ replace = true, fresh = false, recordUndo = true } = {}) {
   if (!requireLogin()) return;
   toast("กำลังโหลด Peerland…");
   const res = await fetch(new URL("data/peerland_2024-2025.json", window.location.href));
@@ -527,54 +771,54 @@ async function startPeerland({ replace = true } = {}) {
   const payload = await res.json();
   const rows = Array.isArray(payload.transactions) ? payload.transactions : [];
   if (!rows.length) throw new Error("ไม่พบรายการ Peerland");
-  if (replace) {
-    state.transactions = [];
+
+  const run = () => {
+    if (replace || fresh) {
+      state.transactions = [];
+      state.rules = [];
+    }
+    if (fresh) {
+      state.groupNotes = {};
+      state.categories = [...PEERLAND_CATEGORIES];
+    } else {
+      for (const c of PEERLAND_CATEGORIES) {
+        if (!state.categories.includes(c)) state.categories.push(c);
+      }
+    }
+    state.projectSource = "peerland";
+    state.transactions = dedupeTransactions([
+      ...rows.map((t) => ({
+        ...t,
+        category: fresh ? "" : t.category || "",
+        note: fresh ? "" : t.note || "",
+        source: t.source || "peerland_2024-2025_full.pdf",
+      })),
+      ...state.transactions,
+    ]);
     state.rules = [];
+    for (const rule of PEERLAND_RULES) {
+      state.rules = upsertRule(state.rules, rule);
+    }
+    const applied = applyRules(state.transactions, state.rules);
+    state.transactions = applied.transactions;
+    state.rules = applied.rules;
+  };
+
+  if (recordUndo) {
+    const before = cloneStateSlice();
+    run();
+    pushUndo(fresh ? "เคลียร์อ่าน Peerland ใหม่" : "โหลด Peerland", before);
+  } else {
+    run();
   }
-  const peerlandCats = [
-    "รายได้ลูกค้า / QR",
-    "Shopee / Lazada",
-    "ชำระบัตรกสิกร",
-    "โอนภายใน / ส่วนตัว",
-    "ค่าธรรมเนียม",
-    "สินค้า / ซูเปอร์มาร์เก็ต",
-    "หลักทรัพย์ / ออม",
-    "อื่นๆ",
-  ];
-  for (const c of peerlandCats) {
-    if (!state.categories.includes(c)) state.categories.push(c);
-  }
-  state.transactions = dedupeTransactions([
-    ...rows.map((t) => ({
-      ...t,
-      category: t.category || "",
-      note: t.note || "",
-      source: t.source || "peerland_2024-2025_full.pdf",
-    })),
-    ...state.transactions,
-  ]);
-  for (const rule of [
-    { keywords: ["ช้อปปี้เพย์", "shopee"], category: "Shopee / Lazada" },
-    { keywords: ["lazada"], category: "Shopee / Lazada" },
-    { keywords: ["บัตรกสิกรไทย"], category: "ชำระบัตรกสิกร" },
-    { keywords: ["ค่าธรรมเนียม"], category: "ค่าธรรมเนียม" },
-    { keywords: ["my qr", "รับโอนเงินผ่าน qr"], category: "รายได้ลูกค้า / QR" },
-    { keywords: ["ซีพี แอ็กซ์ตร้า", "cp axtra"], category: "สินค้า / ซูเปอร์มาร์เก็ต" },
-    { keywords: ["ksecurities", "หลักทรัพย์"], category: "หลักทรัพย์ / ออม" },
-    { keywords: ["phiraphong yohakh", "พีระพงษ์ โยหาเ"], category: "โอนภายใน / ส่วนตัว" },
-  ]) {
-    state.rules = upsertRule(state.rules, rule);
-  }
-  const applied = applyRules(state.transactions, state.rules);
-  state.transactions = applied.transactions;
-  state.rules = applied.rules;
+
   schedulePersist();
   renderTable();
   const params = new URLSearchParams(window.location.search);
   params.set("peerland", "1");
   params.delete("demo");
   window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-  toast(`Peerland ${rows.length.toLocaleString("th-TH")} รายการ`);
+  toast(`Peerland ${rows.length.toLocaleString("th-TH")} รายการ${fresh ? " · เริ่มใหม่" : ""}`);
 }
 
 function updateAuthButton() {
@@ -641,6 +885,7 @@ async function setupAuth() {
             if (remote.categories?.length) state.categories = remote.categories;
             if (remote.rules?.length) state.rules = remote.rules;
             if (remote.groupNotes) state.groupNotes = remote.groupNotes;
+            if (remote.projectSource) state.projectSource = remote.projectSource;
             saveState(state);
             toast("ดึงข้อมูลจาก Firebase แล้ว");
           } else {
@@ -699,28 +944,38 @@ function wireEvents() {
     if (!requireLogin()) return;
     const name = (els.newGroupName.value || "").trim();
     if (!name) return;
-    if (!state.categories.includes(name)) {
-      state.categories.unshift(name);
-      schedulePersist();
-      refreshCategoryOptions();
-      toast(`เพิ่มกลุ่ม “${name}” แล้ว`);
-    } else {
+    if (state.categories.includes(name)) {
       toast("มีกลุ่มนี้อยู่แล้ว");
+      els.newGroupName.value = "";
+      return;
     }
+    withUndo(`เพิ่มกลุ่ม “${name}”`, () => {
+      state.categories.unshift(name);
+    });
+    schedulePersist();
+    refreshCategoryOptions();
     els.newGroupName.value = "";
     renderGroupSummary();
+    toast(`เพิ่มกลุ่ม “${name}” แล้ว`);
+  });
+
+  els.txBody.addEventListener("focusin", (e) => {
+    const note = e.target.closest("[data-note]");
+    const cat = e.target.closest("[data-cat]");
+    if (note) rememberField(note);
+    if (cat) rememberField(cat);
   });
 
   els.txBody.addEventListener("input", (e) => {
     const note = e.target.closest("[data-note]");
     if (note) {
-      patchTx(note.getAttribute("data-note"), { note: note.value });
+      patchTx(note.getAttribute("data-note"), { note: note.value }, { recordUndo: false });
       return;
     }
     const cat = e.target.closest("[data-cat]");
     if (cat) {
       cat.classList.toggle("has-value", Boolean(cat.value.trim()));
-      patchTx(cat.getAttribute("data-cat"), { category: cat.value.trim() });
+      patchTx(cat.getAttribute("data-cat"), { category: cat.value.trim() }, { recordUndo: false });
     }
   });
 
@@ -733,10 +988,33 @@ function wireEvents() {
       if (els.bulkCount) els.bulkCount.textContent = `เลือก ${selectedIds.size.toLocaleString("th-TH")}`;
       return;
     }
+    const note = e.target.closest("[data-note]");
+    if (note) {
+      const id = note.getAttribute("data-note");
+      const beforeVal = fieldBefore.get(note);
+      fieldBefore.delete(note);
+      if (beforeVal !== undefined && beforeVal !== note.value) {
+        const before = cloneStateSlice();
+        const tx = before.transactions.find((t) => t.id === id);
+        if (tx) tx.note = beforeVal;
+        pushUndo("แก้ Note", before);
+        updateUndoButton();
+      }
+      return;
+    }
     const cat = e.target.closest("[data-cat]");
     if (!cat) return;
+    const id = cat.getAttribute("data-cat");
     const value = cat.value.trim();
-    patchTx(cat.getAttribute("data-cat"), { category: value }, { learn: Boolean(value) });
+    const beforeVal = fieldBefore.has(cat) ? fieldBefore.get(cat) : null;
+    fieldBefore.delete(cat);
+    const before = cloneStateSlice();
+    if (beforeVal !== null) {
+      const tx = before.transactions.find((t) => t.id === id);
+      if (tx) tx.category = beforeVal;
+    }
+    patchTx(id, { category: value }, { learn: Boolean(value), recordUndo: false });
+    if (beforeVal !== value) pushUndo("ใส่กลุ่ม", before);
     scheduleRender();
   });
 
@@ -752,7 +1030,12 @@ function wireEvents() {
       renderGroupSummary();
       return;
     }
-    if (e.target.closest("[data-group-note]")) return;
+    const renameBtn = e.target.closest("[data-rename-group]");
+    if (renameBtn) {
+      beginRenameGroup(renameBtn.getAttribute("data-rename-group"));
+      return;
+    }
+    if (e.target.closest("[data-group-note]") || e.target.closest("[data-rename-form]")) return;
     const filterBtn = e.target.closest("[data-filter-group]");
     if (filterBtn) {
       els.filterCategory.value = filterBtn.getAttribute("data-filter-group");
@@ -768,12 +1051,29 @@ function wireEvents() {
     if (exportBtn) exportGroup(exportBtn.getAttribute("data-export-group"));
   });
 
+  els.groupList?.addEventListener("focusin", (e) => {
+    const note = e.target.closest("[data-group-note]");
+    if (note) rememberField(note);
+  });
+
   els.groupList?.addEventListener("input", (e) => {
     const note = e.target.closest("[data-group-note]");
     if (!note) return;
     const key = note.getAttribute("data-group-note");
     state.groupNotes[key] = note.value;
     schedulePersist();
+  });
+
+  els.groupList?.addEventListener("change", (e) => {
+    const note = e.target.closest("[data-group-note]");
+    if (!note) return;
+    const key = note.getAttribute("data-group-note");
+    const beforeVal = fieldBefore.get(note);
+    fieldBefore.delete(note);
+    if (beforeVal === undefined || beforeVal === note.value) return;
+    const before = cloneStateSlice();
+    before.groupNotes[key] = beforeVal;
+    pushUndo("แก้ Note กลุ่ม", before);
   });
 
   document.querySelectorAll(".th-sort").forEach((btn) => {
@@ -799,6 +1099,19 @@ function wireEvents() {
   els.btnBulkClear?.addEventListener("click", () => {
     selectedIds.clear();
     scheduleRender();
+  });
+  els.btnUndo?.addEventListener("click", undoLast);
+  els.btnReloadProject?.addEventListener("click", () => {
+    reloadProjectFresh().catch((err) => toast(err.message || "อ่านใหม่ไม่สำเร็จ"));
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "z" && !e.shiftKey) {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+      e.preventDefault();
+      undoLast();
+    }
   });
 
   els.btnExport?.addEventListener("click", () => {
@@ -836,6 +1149,7 @@ function wireEvents() {
 }
 
 wireEvents();
+updateUndoButton();
 renderTable();
 setupAuth();
 
