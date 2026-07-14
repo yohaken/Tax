@@ -283,18 +283,18 @@ body {
 .group-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92rem;
-  min-width: 720px;
+  font-size: 0.88rem;
+  min-width: 640px;
 }
 .group-table th,
 .group-table td {
-  padding: 0.6rem 0.55rem;
+  padding: 0.35rem 0.4rem;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: middle;
 }
 .group-table th {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--mute);
@@ -316,13 +316,20 @@ body {
   font-weight: 700;
   background: rgba(26, 26, 26, 0.03);
   border-bottom: 0;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }
-.group-table .col-actions { width: 1%; white-space: nowrap; }
+.group-table .col-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
 .group-title-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.35rem 0.45rem;
+  gap: 0.3rem;
+  min-width: 0;
 }
 .group-title-btn {
   appearance: none;
@@ -334,19 +341,28 @@ body {
   color: inherit;
   cursor: pointer;
   text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .group-title-btn:hover { color: var(--accent); }
+.group-title-row .btn.tiny {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+}
 .rename-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 0.3rem;
-  margin: 0.35rem 0 0;
+  margin: 0.2rem 0 0;
 }
 .rename-form input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 0.35rem 0.5rem;
+  padding: 0.3rem 0.45rem;
   font: inherit;
   color: var(--ink);
   background: #fff;
@@ -357,17 +373,27 @@ body {
   margin-top: 0.1rem;
 }
 .group-note-cell {
-  min-width: 8rem;
+  min-width: 6.5rem;
+  max-width: 11rem;
 }
 .group-note-cell .group-note {
-  padding: 0.35rem 0.5rem;
-  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+  border-radius: 8px;
 }
 .group-actions {
-  display: flex;
-  gap: 0.3rem;
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+.group-actions .btn.tiny {
+  padding: 0.18rem 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
 }
 .btn.tiny {
   padding: 0.28rem 0.65rem;
@@ -539,7 +565,8 @@ body {
     flex-direction: column;
     align-items: stretch;
   }
-  .group-table { min-width: 680px; }
+  .group-table { min-width: 600px; }
+  .group-actions .btn.tiny { padding: 0.16rem 0.4rem; }
 }
 @media (max-width: 640px) {
   .topbar {

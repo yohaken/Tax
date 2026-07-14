@@ -470,9 +470,9 @@ function renderGroupSummary() {
           <input class="group-note" data-group-note="${escapeHtml(g.key)}" value="${escapeHtml(gNote)}" placeholder="Note กลุ่ม…" />
         </td>
         <td class="group-actions">
-          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}">ดู</button>
-          <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}">Export</button>
-          <button type="button" class="btn quiet tiny" data-print-group="${escapeHtml(g.key)}">พิมพ์</button>
+          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}" title="ดูกลุ่ม">ดู</button>
+          <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}" title="Export กลุ่มนี้">Ex</button>
+          <button type="button" class="btn quiet tiny" data-print-group="${escapeHtml(g.key)}" title="พิมพ์กลุ่มนี้">พิมพ์</button>
         </td>
       </tr>`;
     })
