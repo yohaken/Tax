@@ -459,7 +459,7 @@ body {
 }
 .group-title-row {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
