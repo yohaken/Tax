@@ -1,5 +1,14 @@
 {
   "projects": {
     "default": "mypeer-501909"
+  },
+  "targets": {
+    "mypeer-501909": {
+      "hosting": {
+        "taxtag": [
+          "taxtag"
+        ]
+      }
+    }
   }
 }

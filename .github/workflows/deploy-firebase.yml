@@ -1,41 +1,49 @@
-name: Deploy TaxTag to Firebase Hosting
-
-# One-time setup (owner):
-# 1) Create Firebase project → enable Hosting
-# 2) npx firebase-tools login:ci  → copy token
-# 3) Repo Settings → Secrets: FIREBASE_TOKEN, FIREBASE_PROJECT_ID
-# Then every push to main deploys to https://<project-id>.web.app
+name: Deploy TaxTag to Google Firebase
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: mypeer-501909
+  SITE_ID: taxtag
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check Firebase secrets
-        id: check
-        env:
-          TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-        run: |
-          if [ -z "$TOKEN" ] || [ -z "$PROJECT_ID" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Missing FIREBASE_TOKEN or FIREBASE_PROJECT_ID — skip deploy."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "project=$PROJECT_ID" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Deploy Hosting
-        if: steps.check.outputs.skip == 'false'
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enable Firebase / create Hosting site
         run: |
-          npm i -g firebase-tools
-          printf '%s\n' '{"projects":{"default":"'"${{ steps.check.outputs.project }}"'"}}' > .firebaserc
-          firebase deploy --only hosting --token "$FIREBASE_TOKEN" --project "${{ steps.check.outputs.project }}" --non-interactive
+          gcloud config set project "$PROJECT_ID"
+          gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com --project "$PROJECT_ID" || true
+          # Create Hosting site if missing (id becomes https://taxtag.web.app)
+          npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
+          npx firebase-tools@13 target:apply hosting taxtag "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
+
+      - name: Deploy Hosting + Firestore rules
+        run: |
+          npx firebase-tools@13 deploy --only hosting:taxtag,firestore:rules \
+            --project "$PROJECT_ID" \
+            --non-interactive
+
+      - name: Summary
+        run: |
+          {
+            echo "## TaxTag on Google"
+            echo "- App: https://${SITE_ID}.web.app"
+            echo "- Also: https://${SITE_ID}.firebaseapp.com"
+          } >> "$GITHUB_STEP_SUMMARY"

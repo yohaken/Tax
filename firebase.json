@@ -3,6 +3,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
+    "target": "taxtag",
     "public": "public",
     "ignore": [
       "firebase.json",
@@ -11,20 +12,11 @@
     ],
     "headers": [
       {
-        "source": "**/*.@(js|css)",
+        "source": "**",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public,max-age=300"
-          }
-        ]
-      },
-      {
-        "source": "data/**",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "public,max-age=3600"
+            "value": "no-cache, no-store, must-revalidate"
           }
         ]
       }
