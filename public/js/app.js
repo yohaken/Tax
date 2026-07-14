@@ -105,12 +105,15 @@ const els = {
   btnUndo: document.getElementById("btn-undo"),
   btnReloadProject: document.getElementById("btn-reload-project"),
   btnSplitMerged: document.getElementById("btn-split-merged"),
+  btnDeleteProject: document.getElementById("btn-delete-project"),
+  btnRenameProject: document.getElementById("btn-rename-project"),
+  btnOpenTelltea: document.getElementById("btn-open-telltea"),
+  projectNameLabel: document.getElementById("project-name-label"),
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
   btnAuthHero: document.getElementById("btn-auth-hero"),
   btnDemo: document.getElementById("btn-demo"),
   fileInputHero: document.getElementById("file-input-hero"),
-  projectNickname: document.getElementById("project-nickname"),
   projectFileHint: document.getElementById("project-file-hint"),
   syncStatus: document.getElementById("sync-status"),
   buildStamp: document.getElementById("build-stamp"),
@@ -187,9 +190,7 @@ function fileStem(name) {
 }
 
 function paintProjectNickUi() {
-  if (els.projectNickname && document.activeElement !== els.projectNickname) {
-    els.projectNickname.value = state.projectName || "";
-  }
+  if (els.projectNameLabel) els.projectNameLabel.textContent = state.projectName || "—";
   if (els.projectFileHint) {
     els.projectFileHint.textContent = state.fileName ? `ไฟล์: ${state.fileName}` : "ไฟล์: —";
   }
@@ -726,7 +727,6 @@ function renderGroupSummary() {
     .map((g) => {
       const isActive = active === g.key;
       const gNote = state.groupNotes?.[g.key] || "";
-      const nick = state.groupNicknames?.[g.key] || "";
       return `<tr class="${isActive ? "is-active" : ""}" data-group="${escapeHtml(g.key)}">
         <td>
           <div class="group-title-row">
@@ -737,11 +737,6 @@ function renderGroupSummary() {
                 : `<button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(g.key)}" title="เปลี่ยนชื่อกลุ่มในรายการ">เปลี่ยนชื่อ</button>`
             }
           </div>
-          ${
-            g.key === "__uncat"
-              ? ""
-              : `<input class="group-nick" data-group-nick="${escapeHtml(g.key)}" value="${escapeHtml(nick)}" placeholder="ชื่อเล่นกลุ่ม…" title="ชื่อเล่นสำหรับสรุป/พิมพ์" />`
-          }
         </td>
         <td class="num">${g.count.toLocaleString("th-TH")}</td>
         <td class="num amount-in">${escapeHtml(formatMoney(g.sumIn))}</td>
@@ -1187,6 +1182,129 @@ async function reloadProjectFresh() {
   toast("เคลียร์แท็ก/Note/ชื่อเล่นแล้ว · กดเลิกทำได้");
 }
 
+function deleteActiveProject() {
+  if (!requireLogin()) return;
+  const name = state.projectName || state.fileName || "โปรเจกต์นี้";
+  const count = state.transactions.length;
+  const ok = window.confirm(
+    `ลบโปรเจกต์ “${name}” ทั้งไฟล์?\n\nจะลบ ${count.toLocaleString("th-TH")} รายการถาวรจากเครื่องนี้ (ยกเลิกไม่ได้)`
+  );
+  if (!ok) return;
+  syncActiveFromState();
+  const id = workspace.activeId;
+  workspace.projects = workspace.projects.filter((p) => p.id !== id);
+  if (!workspace.projects.length) {
+    const empty = {
+      id: makeProjectId(),
+      name: "โปรเจกต์ว่าง",
+      source: "local",
+      fileName: "",
+      updatedAt: new Date().toISOString(),
+      ...emptyProjectFields(),
+    };
+    workspace.projects = [empty];
+    applyProjectToState(empty);
+  } else {
+    applyProjectToState(workspace.projects[0]);
+  }
+  clearSessionUi();
+  undoStack.length = 0;
+  updateUndoButton();
+  selectedIds.clear();
+  schedulePersist();
+  renderProjectSelect();
+  renderTable();
+  toast(`ลบโปรเจกต์ “${name}” แล้ว`);
+}
+
+function renameActiveProject() {
+  if (!requireLogin()) return;
+  const current = state.projectName || "";
+  const next = window.prompt("ตั้งชื่อโปรเจกต์ (ชื่อเล่นให้จำว่าคือไฟล์ไหน)", current);
+  if (next == null) return;
+  const name = next.trim().slice(0, 80);
+  if (!name) {
+    toast("ใส่ชื่อโปรเจกต์");
+    return;
+  }
+  withUndo("ตั้งชื่อโปรเจกต์", () => {
+    state.projectName = name;
+  });
+  schedulePersist();
+  renderProjectSelect();
+  paintProjectNickUi();
+  toast(`ตั้งชื่อเป็น “${name}”`);
+}
+
+async function loadBundledDataFile({ jsonUrl, fileName, projectName }) {
+  if (!requireLogin()) return null;
+  const existing = workspace.projects.find(
+    (p) => p.fileName === fileName || p.name === projectName || p.name === fileStem(fileName)
+  );
+  if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
+    syncActiveFromState();
+    applyProjectToState(existing);
+    clearSessionUi();
+    schedulePersist();
+    renderProjectSelect();
+    renderTable();
+    toast(`เปิดโปรเจกต์ “${existing.name}” ที่มีอยู่แล้ว`);
+    return existing;
+  }
+  toast(`กำลังโหลด ${fileName}…`);
+  const res = await fetch(new URL(jsonUrl, window.location.href));
+  if (!res.ok) throw new Error(`โหลด ${fileName} ไม่สำเร็จ (${res.status})`);
+  const payload = await res.json();
+  let rows = Array.isArray(payload.transactions) ? payload.transactions : [];
+  rows = rows.map((t) => ({
+    ...t,
+    category: t.category || "",
+    note: t.note || "",
+    source: t.source || fileName,
+  }));
+  if (!rows.length) throw new Error(`ไม่พบรายการใน ${fileName}`);
+  const project = createProjectFromRows({
+    name: projectName || fileStem(fileName),
+    source: "import",
+    fileName,
+    rows,
+    categories: defaultCategories(),
+    rules: [],
+    groupNotes: {},
+    groupNicknames: {},
+    activate: true,
+  });
+  schedulePersist();
+  renderProjectSelect();
+  renderTable();
+  toast(`สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ`);
+  return project;
+}
+
+async function openTellteaProject() {
+  return loadBundledDataFile({
+    jsonUrl: "data/telltea_2024-2025.json",
+    fileName: "telltea_2024-2025_full.pdf",
+    projectName: "telltea_2024-2025",
+  });
+}
+
+async function ensureTellteaProjectSeeded() {
+  const exists = workspace.projects.some(
+    (p) =>
+      p.fileName === "telltea_2024-2025_full.pdf" ||
+      p.name === "telltea_2024-2025" ||
+      String(p.fileName || "").includes("telltea")
+  );
+  if (exists) return null;
+  try {
+    return await openTellteaProject();
+  } catch (err) {
+    console.warn(err);
+    return null;
+  }
+}
+
 async function importFiles(fileList) {
   if (!requireLogin("ต้องเข้าสู่ระบบก่อนจึงจะนำเข้าไฟล์ได้")) return;
   const files = [...fileList].filter(Boolean);
@@ -1397,6 +1515,7 @@ async function setupAuth() {
       renderTable();
       await runPendingLoads();
       recoverMergedImports({ silent: true });
+      await ensureTellteaProjectSeeded();
     });
   } catch (err) {
     console.warn(err);
@@ -1568,20 +1687,9 @@ function wireEvents() {
   els.groupList?.addEventListener("focusin", (e) => {
     const note = e.target.closest("[data-group-note]");
     if (note) rememberField(note);
-    const nick = e.target.closest("[data-group-nick]");
-    if (nick) rememberField(nick);
   });
 
   els.groupList?.addEventListener("input", (e) => {
-    const nick = e.target.closest("[data-group-nick]");
-    if (nick) {
-      const key = nick.getAttribute("data-group-nick");
-      const next = nick.value.trim();
-      if (next) state.groupNicknames[key] = next;
-      else delete state.groupNicknames[key];
-      schedulePersist();
-      return;
-    }
     const note = e.target.closest("[data-group-note]");
     if (!note) return;
     const key = note.getAttribute("data-group-note");
@@ -1590,23 +1698,6 @@ function wireEvents() {
   });
 
   els.groupList?.addEventListener("change", (e) => {
-    const nick = e.target.closest("[data-group-nick]");
-    if (nick) {
-      const key = nick.getAttribute("data-group-nick");
-      const beforeVal = fieldBefore.get(nick);
-      fieldBefore.delete(nick);
-      const next = nick.value.trim();
-      if (beforeVal !== undefined && beforeVal !== next) {
-        const before = cloneStateSlice();
-        before.groupNicknames[key] = beforeVal;
-        pushUndo("ตั้งชื่อเล่นกลุ่ม", before);
-      }
-      if (next) state.groupNicknames[key] = next;
-      else delete state.groupNicknames[key];
-      schedulePersist();
-      scheduleRender();
-      return;
-    }
     const note = e.target.closest("[data-group-note]");
     if (!note) return;
     const key = note.getAttribute("data-group-note");
@@ -1690,24 +1781,12 @@ function wireEvents() {
   els.btnAuth?.addEventListener("click", handleAuthClick);
   els.btnAuthHero?.addEventListener("click", handleAuthClick);
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }).catch((err) => toast(err.message)));
+  els.btnOpenTelltea?.addEventListener("click", () => openTellteaProject().catch((err) => toast(err.message)));
+  els.btnRenameProject?.addEventListener("click", renameActiveProject);
+  els.btnDeleteProject?.addEventListener("click", deleteActiveProject);
   els.fileInputHero?.addEventListener("change", (e) => {
     importFiles(e.target.files).catch((err) => toast(err.message || "นำเข้าไม่สำเร็จ"));
     e.target.value = "";
-  });
-
-  els.projectNickname?.addEventListener("change", () => {
-    const name = (els.projectNickname.value || "").trim();
-    if (!name) return;
-    state.projectName = name.slice(0, 80);
-    schedulePersist();
-    renderProjectSelect();
-    toast(`ตั้งชื่อโปรเจกต์เป็น “${name}”`);
-  });
-  els.projectNickname?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      els.projectNickname.blur();
-    }
   });
 }
 
