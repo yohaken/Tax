@@ -46,6 +46,7 @@ const els = {
   btnApplyRules: document.getElementById("btn-apply-rules"),
   btnBulkTag: document.getElementById("btn-bulk-tag"),
   btnDemo: document.getElementById("btn-demo"),
+  btnPeerland: document.getElementById("btn-peerland"),
   toast: document.getElementById("toast"),
   statCount: document.getElementById("stat-count"),
   statUncat: document.getElementById("stat-uncat"),
@@ -272,13 +273,96 @@ async function startDemo({ replace = false } = {}) {
 
     const params = new URLSearchParams(window.location.search);
     params.set("demo", "1");
+    params.delete("peerland");
     const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ""}`;
     window.history.replaceState({}, "", next);
-    document.getElementById("test-banner")?.classList.remove("is-hidden");
+    const banner = document.getElementById("test-banner");
+    if (banner) {
+      banner.textContent = "โหมดทดสอบสั้น — โหลดข้อมูลตัวอย่างแล้ว";
+      banner.classList.remove("is-hidden");
+    }
     toast("โหมดทดสอบพร้อมแล้ว — ลองค้นหาหรือติดป้ายได้เลย");
   } catch (err) {
     console.error(err);
     toast(err.message || "เริ่มทดสอบไม่สำเร็จ");
+  }
+}
+
+async function startPeerland({ replace = true } = {}) {
+  toast("กำลังโหลด Peerland 2024–2025…");
+  try {
+    const res = await fetch(new URL("data/peerland_2024-2025.json", window.location.href));
+    if (!res.ok) throw new Error(`โหลด Peerland ไม่สำเร็จ (${res.status})`);
+    const payload = await res.json();
+    const rows = Array.isArray(payload.transactions) ? payload.transactions : [];
+    if (!rows.length) throw new Error("ไม่พบรายการในไฟล์ Peerland");
+
+    if (replace) {
+      state.transactions = [];
+      state.rules = [];
+      selectedIds.clear();
+    }
+
+    // Ensure categories useful for this statement
+    const peerlandCats = [
+      "รายได้ลูกค้า / QR",
+      "Shopee / Lazada",
+      "ชำระบัตรกสิกร",
+      "โอนภายใน / ส่วนตัว",
+      "ค่าธรรมเนียม",
+      "สินค้า / ซูเปอร์มาร์เก็ต",
+      "หลักทรัพย์ / ออม",
+      "อื่นๆ",
+    ];
+    for (const c of peerlandCats) {
+      if (!state.categories.includes(c)) state.categories.push(c);
+    }
+
+    state.transactions = dedupeTransactions([
+      ...rows.map((t) => ({
+        ...t,
+        category: t.category || "",
+        note: t.note || "",
+        source: t.source || "peerland_2024-2025_full.pdf",
+      })),
+      ...state.transactions,
+    ]);
+
+    // Light starter rules from common merchants/channels in this statement
+    const starter = [
+      { keywords: ["ช้อปปี้เพย์", "shopee"], category: "Shopee / Lazada" },
+      { keywords: ["lazada"], category: "Shopee / Lazada" },
+      { keywords: ["บัตรกสิกรไทย"], category: "ชำระบัตรกสิกร" },
+      { keywords: ["ค่าธรรมเนียม"], category: "ค่าธรรมเนียม" },
+      { keywords: ["my qr", "รับโอนเงินผ่าน qr"], category: "รายได้ลูกค้า / QR" },
+      { keywords: ["ซีพี แอ็กซ์ตร้า", "cp axtra"], category: "สินค้า / ซูเปอร์มาร์เก็ต" },
+      { keywords: ["ksecurities", "หลักทรัพย์"], category: "หลักทรัพย์ / ออม" },
+      { keywords: ["phiraphong yohakh", "พีระพงษ์ โยหาเ"], category: "โอนภายใน / ส่วนตัว" },
+    ];
+    for (const rule of starter) {
+      state.rules = upsertRule(state.rules, rule);
+    }
+    const applied = applyRules(state.transactions, state.rules);
+    state.transactions = applied.transactions;
+    state.rules = applied.rules;
+    persist();
+    renderTable();
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("peerland", "1");
+    params.delete("demo");
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+    const banner = document.getElementById("test-banner");
+    if (banner) {
+      const count = state.transactions.length.toLocaleString("th-TH");
+      const period = payload.meta?.period || "2024–2025";
+      banner.textContent = `Peerland ${period} — โหลดแล้ว ${count} รายการ · ติดป้ายอัตโนมัติ ${applied.applied.toLocaleString("th-TH")} รายการ`;
+      banner.classList.remove("is-hidden");
+    }
+    toast(`โหลด Peerland ${rows.length.toLocaleString("th-TH")} รายการแล้ว`);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || "โหลด Peerland ไม่สำเร็จ");
   }
 }
 
@@ -287,6 +371,11 @@ function shouldAutostartDemo() {
   if (params.get("demo") === "1" || params.get("test") === "1") return true;
   if (window.location.hash === "#demo") return true;
   return false;
+}
+
+function shouldAutostartPeerland() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("peerland") === "1" || window.location.hash === "#peerland";
 }
 
 function openTagDialog(ids) {
@@ -494,13 +583,14 @@ function wireEvents() {
   });
 
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }));
+  els.btnPeerland?.addEventListener("click", () => startPeerland({ replace: true }));
 }
 
 wireEvents();
 renderTable();
 
-if (!state.transactions.length && shouldAutostartDemo()) {
+if (shouldAutostartPeerland()) {
+  startPeerland({ replace: true });
+} else if (!state.transactions.length && shouldAutostartDemo()) {
   startDemo({ replace: true });
-} else if (!state.transactions.length) {
-  // First-visit test path: open with empty data shows CTA; auto demo on ?demo=1 only
 }
