@@ -955,7 +955,9 @@ function beginRenameGroup(groupKey) {
 }
 
 function detectProjectSource() {
-  if (state.projectSource === "peerland" || state.projectSource === "demo") return state.projectSource;
+  if (state.projectSource === "peerland" || state.projectSource === "demo" || state.projectSource === "import") {
+    return state.projectSource;
+  }
   const params = new URLSearchParams(window.location.search);
   if (params.get("peerland") === "1") return "peerland";
   if (params.get("demo") === "1") return "demo";
