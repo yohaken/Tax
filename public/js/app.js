@@ -2,6 +2,10 @@ import { parseFile, dedupeTransactions } from "./parser.js";
 import {
   loadState,
   saveState,
+  loadWorkspace,
+  emptyProjectFields,
+  defaultCategories,
+  makeProjectId,
   extractKeywords,
   upsertRule,
   applyRules,
@@ -21,9 +25,12 @@ import {
   pushCloudState,
 } from "./firebase.js";
 
+const workspace = loadWorkspace();
 const state = loadState();
 if (!state.groupNotes) state.groupNotes = {};
 if (!state.projectSource) state.projectSource = "";
+if (!state.projectName) state.projectName = "โปรเจกต์";
+if (!state.projectId) state.projectId = workspace.activeId;
 
 let currentUser = null;
 let cloudReady = false;
@@ -95,6 +102,7 @@ const els = {
   btnExport: document.getElementById("btn-export"),
   btnUndo: document.getElementById("btn-undo"),
   btnReloadProject: document.getElementById("btn-reload-project"),
+  projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
   btnAuthHero: document.getElementById("btn-auth-hero"),
   btnPeerland: document.getElementById("btn-peerland"),
@@ -125,6 +133,95 @@ function toast(message) {
   toast._t = setTimeout(() => els.toast.classList.remove("show"), 2400);
 }
 
+function printMoney(n) {
+  return formatMoney(n, { currency: false });
+}
+
+function syncActiveFromState() {
+  const active = workspace.projects.find((p) => p.id === workspace.activeId);
+  if (!active) return;
+  active.transactions = state.transactions;
+  active.categories = state.categories;
+  active.rules = state.rules;
+  active.groupNotes = state.groupNotes || {};
+  active.projectSource = state.projectSource || "";
+  active.source = state.projectSource || active.source || "local";
+  active.name = state.projectName || active.name;
+  active.updatedAt = new Date().toISOString();
+}
+
+function applyProjectToState(project) {
+  state.transactions = Array.isArray(project.transactions) ? project.transactions : [];
+  state.categories = project.categories?.length ? [...project.categories] : defaultCategories();
+  state.rules = Array.isArray(project.rules) ? project.rules : [];
+  state.groupNotes = project.groupNotes && typeof project.groupNotes === "object" ? { ...project.groupNotes } : {};
+  state.projectSource = project.projectSource || project.source || "";
+  state.projectId = project.id;
+  state.projectName = project.name || "โปรเจกต์";
+  workspace.activeId = project.id;
+}
+
+function clearSessionUi() {
+  undoStack.length = 0;
+  updateUndoButton();
+  selectedIds.clear();
+  periodMode = "all";
+  if (els.dateFrom) els.dateFrom.value = "";
+  if (els.dateTo) els.dateTo.value = "";
+  if (els.search) els.search.value = "";
+  if (els.filterCategory) els.filterCategory.value = "";
+  if (els.filterDirection) els.filterDirection.value = "";
+}
+
+function renderProjectSelect() {
+  if (!els.projectSelect) return;
+  const options = workspace.projects
+    .map((p) => {
+      const count = Array.isArray(p.transactions) ? p.transactions.length : 0;
+      const label = `${p.name} (${count.toLocaleString("th-TH")})`;
+      return `<option value="${escapeHtml(p.id)}"${p.id === workspace.activeId ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  els.projectSelect.innerHTML = options || `<option value="">ไม่มีโปรเจกต์</option>`;
+}
+
+function switchProject(projectId) {
+  if (!projectId || projectId === workspace.activeId) return;
+  const next = workspace.projects.find((p) => p.id === projectId);
+  if (!next) return;
+  syncActiveFromState();
+  applyProjectToState(next);
+  clearSessionUi();
+  schedulePersist();
+  renderProjectSelect();
+  scheduleRender();
+  toast(`เปิดโปรเจกต์ “${next.name}”`);
+}
+
+function createProjectFromRows({ name, source, rows, categories, rules = [], groupNotes = {} }) {
+  syncActiveFromState();
+  const project = {
+    id: makeProjectId(),
+    name: String(name || "โปรเจกต์ใหม่").slice(0, 80),
+    source: source || "import",
+    updatedAt: new Date().toISOString(),
+    ...emptyProjectFields({
+      transactions: rows,
+      categories: categories?.length ? categories : defaultCategories(),
+      rules,
+      groupNotes,
+      projectSource: source || "import",
+    }),
+  };
+  workspace.projects = workspace.projects.filter(
+    (p) => !(Array.isArray(p.transactions) && p.transactions.length === 0 && (p.name === "โปรเจกต์ว่าง" || p.source === "local"))
+  );
+  workspace.projects.unshift(project);
+  applyProjectToState(project);
+  clearSessionUi();
+  return project;
+}
+
 function setSync(text) {
   if (els.syncStatus) els.syncStatus.textContent = text;
 }
@@ -139,6 +236,8 @@ function cloneStateSlice() {
     })),
     groupNotes: { ...(state.groupNotes || {}) },
     projectSource: state.projectSource || "",
+    projectName: state.projectName || "",
+    projectId: state.projectId || "",
   };
 }
 
@@ -151,6 +250,8 @@ function applyStateSlice(slice) {
   }));
   state.groupNotes = { ...(slice.groupNotes || {}) };
   state.projectSource = slice.projectSource || "";
+  if (slice.projectName) state.projectName = slice.projectName;
+  if (slice.projectId) state.projectId = slice.projectId;
 }
 
 function updateUndoButton() {
@@ -212,7 +313,7 @@ function highlight(text, query) {
 }
 
 function schedulePersist({ cloud = true } = {}) {
-  saveState(state);
+  saveState(state, workspace);
   setSync(currentUser ? "บันทึกในเครื่องแล้ว · กำลังซิงค์…" : "บันทึกอัตโนมัติ");
   clearTimeout(persistTimer);
   persistTimer = setTimeout(async () => {
@@ -221,7 +322,7 @@ function schedulePersist({ cloud = true } = {}) {
       return;
     }
     try {
-      await pushCloudState(currentUser.uid, state);
+      await pushCloudState(currentUser.uid, state, workspace);
       setSync(`ซิงค์แล้ว · ${currentUser.email}`);
     } catch (err) {
       console.warn(err);
@@ -524,9 +625,9 @@ function printGroup(groupKey) {
       ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
       · ${rows.length.toLocaleString("th-TH")} รายการ
       · พิมพ์ ${escapeHtml(printedAt)}
-      <br/>เข้า ${escapeHtml(formatMoney(sumIn))}
-      · ออก ${escapeHtml(formatMoney(sumOut))}
-      · สุทธิ ${escapeHtml(formatMoney(sumIn - sumOut))}
+      <br/>เข้า ${escapeHtml(printMoney(sumIn))}
+      · ออก ${escapeHtml(printMoney(sumOut))}
+      · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}
       ${gNote ? `<br/>Note กลุ่ม: ${escapeHtml(gNote)}` : ""}
     </p>
     <table>
@@ -537,15 +638,15 @@ function printGroup(groupKey) {
             (t) => `<tr>
             <td>${escapeHtml(formatDateTh(t.date))}</td>
             <td>${escapeHtml(t.description)}</td>
-            <td class="num">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : ""}</td>
-            <td class="num">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : ""}</td>
+            <td class="num">${t.direction === "in" ? escapeHtml(printMoney(t.amount)) : ""}</td>
+            <td class="num">${t.direction === "out" ? escapeHtml(printMoney(t.amount)) : ""}</td>
             <td>${escapeHtml(t.note || "")}</td>
           </tr>`
           )
           .join("")}
       </tbody>
     </table>
-    <p class="totals">รวมเข้า ${escapeHtml(formatMoney(sumIn))} · รวมออก ${escapeHtml(formatMoney(sumOut))} · สุทธิ ${escapeHtml(formatMoney(sumIn - sumOut))}</p>
+    <p class="totals">รวมเข้า ${escapeHtml(printMoney(sumIn))} · รวมออก ${escapeHtml(printMoney(sumOut))} · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}</p>
   `;
   window.print();
   setTimeout(() => {
@@ -570,7 +671,8 @@ function printOverview() {
   els.printRoot.innerHTML = `
     <h1>TaxTag · สรุปตามกลุ่ม</h1>
     <p class="print-sub">สำหรับเสนอภาพรวมแยกกลุ่ม
-      <br/>${escapeHtml(periodLabelText())}
+      <br/>โปรเจกต์: ${escapeHtml(state.projectName || "—")}
+      · ${escapeHtml(periodLabelText())}
       ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
       · ${base.length.toLocaleString("th-TH")} รายการ
       · พิมพ์ ${escapeHtml(printedAt)}
@@ -593,9 +695,9 @@ function printOverview() {
             return `<tr>
               <td>${escapeHtml(g.name)}</td>
               <td class="num">${g.count.toLocaleString("th-TH")}</td>
-              <td class="num">${escapeHtml(formatMoney(g.sumIn))}</td>
-              <td class="num">${escapeHtml(formatMoney(g.sumOut))}</td>
-              <td class="num">${escapeHtml(formatMoney(g.net))}</td>
+              <td class="num">${escapeHtml(printMoney(g.sumIn))}</td>
+              <td class="num">${escapeHtml(printMoney(g.sumOut))}</td>
+              <td class="num">${escapeHtml(printMoney(g.net))}</td>
               <td>${escapeHtml(gNote)}</td>
             </tr>`;
           })
@@ -605,9 +707,9 @@ function printOverview() {
         <tr>
           <td><strong>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม)</strong></td>
           <td class="num"><strong>${totals.count.toLocaleString("th-TH")}</strong></td>
-          <td class="num"><strong>${escapeHtml(formatMoney(totals.sumIn))}</strong></td>
-          <td class="num"><strong>${escapeHtml(formatMoney(totals.sumOut))}</strong></td>
-          <td class="num"><strong>${escapeHtml(formatMoney(totals.net))}</strong></td>
+          <td class="num"><strong>${escapeHtml(printMoney(totals.sumIn))}</strong></td>
+          <td class="num"><strong>${escapeHtml(printMoney(totals.sumOut))}</strong></td>
+          <td class="num"><strong>${escapeHtml(printMoney(totals.net))}</strong></td>
           <td></td>
         </tr>
       </tfoot>
@@ -673,6 +775,7 @@ function renderTable() {
 
   els.loginGate?.classList.add("is-hidden");
   els.authTools?.classList.remove("is-hidden");
+  renderProjectSelect();
 
   const hasData = state.transactions.length > 0;
   els.empty.classList.toggle("is-hidden", hasData);
@@ -866,6 +969,24 @@ function detectProjectSource() {
 async function reloadProjectFresh() {
   if (!requireLogin()) return;
   const source = detectProjectSource() || "peerland";
+  if (source === "import") {
+    const ok = window.confirm(
+      `ล้างแท็ก / Note / กฎ ของโปรเจกต์ “${state.projectName || "นี้"}”?\n\nไฟล์นำเข้าไม่มีต้นทางให้โหลดซ้ำ — จะเหลือรายการดิบในโปรเจกต์นี้เท่านั้น`
+    );
+    if (!ok) return;
+    withUndo("เคลียร์แท็กโปรเจกต์นำเข้า", () => {
+      state.groupNotes = {};
+      state.rules = [];
+      for (const t of state.transactions) {
+        t.category = "";
+        t.note = "";
+      }
+    });
+    schedulePersist();
+    scheduleRender();
+    toast("เคลียร์แท็ก/Note แล้ว · กดเลิกทำได้");
+    return;
+  }
   const label =
     source === "demo"
       ? "ตัวอย่างสั้น"
@@ -894,123 +1015,150 @@ async function importFiles(fileList) {
   if (!requireLogin("ต้องเข้าสู่ระบบก่อนจึงจะนำเข้าไฟล์ได้")) return;
   const files = [...fileList].filter(Boolean);
   if (!files.length) return;
-  toast(`กำลังอ่าน ${files.length} ไฟล์…`);
+  toast(`กำลังอ่าน ${files.length} ไฟล์เป็นโปรเจกต์ใหม่…`);
   let imported = [];
   for (const file of files) {
     try {
-      imported = imported.concat(await parseFile(file));
+      const rows = await parseFile(file);
+      imported = imported.concat(rows);
+      await new Promise((r) => setTimeout(r, 0));
     } catch (err) {
       console.error(err);
       toast(`${file.name}: ${err.message || "อ่านไม่สำเร็จ"}`);
     }
   }
-  imported = dedupeTransactions(imported);
+  imported = dedupeTransactions(imported).map((t) => ({
+    ...t,
+    category: t.category || "",
+    note: t.note || "",
+  }));
   if (!imported.length) {
     toast("ไม่พบรายการในไฟล์");
     return;
   }
-  withUndo(`นำเข้า ${imported.length.toLocaleString("th-TH")} รายการ`, () => {
-    state.transactions = dedupeTransactions([...imported, ...state.transactions]);
-    const applied = applyRules(state.transactions, state.rules);
-    state.transactions = applied.transactions;
-    state.rules = applied.rules;
-    if (!state.projectSource) state.projectSource = "import";
+  const baseName =
+    files.length === 1
+      ? String(files[0].name || "ไฟล์ใหม่").replace(/\.[^.]+$/, "")
+      : `นำเข้า ${files.length} ไฟล์`;
+  createProjectFromRows({
+    name: baseName,
+    source: "import",
+    rows: imported,
+    categories: defaultCategories(),
+    rules: [],
+    groupNotes: {},
   });
   schedulePersist();
+  renderProjectSelect();
   renderTable();
-  toast(`นำเข้า ${imported.length.toLocaleString("th-TH")} รายการ`);
+  toast(`สร้างโปรเจกต์ “${baseName}” · ${imported.length.toLocaleString("th-TH")} รายการ (แยกจากของเดิม)`);
 }
 
 async function startDemo({ replace = true, fresh = false, recordUndo = true } = {}) {
   if (!requireLogin()) return;
   const res = await fetch(new URL("sample-statement.csv", window.location.href));
   if (!res.ok) throw new Error("โหลดตัวอย่างไม่สำเร็จ");
-  const text = await res.text();
-  const run = async () => {
-    if (replace || fresh) {
-      state.transactions = [];
-      state.rules = [];
+  const textCsv = await res.text();
+  const parsed = await parseFile(new File([textCsv], "sample-statement.csv", { type: "text/csv" }));
+  const rows = dedupeTransactions(parsed);
+  if (fresh || replace) {
+    const existing = workspace.projects.find((p) => p.projectSource === "demo" || p.source === "demo");
+    if (existing && replace) {
+      syncActiveFromState();
+      existing.transactions = rows;
+      existing.rules = [];
+      existing.groupNotes = fresh ? {} : existing.groupNotes || {};
+      existing.categories = defaultCategories();
+      existing.projectSource = "demo";
+      existing.source = "demo";
+      existing.name = "ตัวอย่างสั้น";
+      existing.updatedAt = new Date().toISOString();
+      applyProjectToState(existing);
+      clearSessionUi();
+    } else {
+      createProjectFromRows({
+        name: "ตัวอย่างสั้น",
+        source: "demo",
+        rows,
+        categories: defaultCategories(),
+        rules: [],
+        groupNotes: {},
+      });
     }
-    if (fresh) state.groupNotes = {};
-    state.projectSource = "demo";
-    const parsed = await parseFile(new File([text], "sample-statement.csv", { type: "text/csv" }));
-    state.transactions = dedupeTransactions([...parsed, ...state.transactions]);
-    const applied = applyRules(state.transactions, state.rules);
-    state.transactions = applied.transactions;
-    state.rules = applied.rules;
-  };
-  if (recordUndo) {
-    const before = cloneStateSlice();
-    await run();
-    pushUndo("โหลดตัวอย่างสั้น", before);
   } else {
-    await run();
+    createProjectFromRows({
+      name: "ตัวอย่างสั้น",
+      source: "demo",
+      rows,
+      categories: defaultCategories(),
+    });
   }
   schedulePersist();
+  renderProjectSelect();
   renderTable();
   const params = new URLSearchParams(window.location.search);
   params.set("demo", "1");
   params.delete("peerland");
   window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-  toast(`โหลดตัวอย่าง ${state.transactions.length.toLocaleString("th-TH")} รายการ`);
+  toast(`โปรเจกต์ตัวอย่าง · ${rows.length.toLocaleString("th-TH")} รายการ`);
 }
 
 async function startPeerland({ replace = true, fresh = false, recordUndo = true } = {}) {
   if (!requireLogin()) return;
-  toast("กำลังโหลด Peerland…");
+  toast("กำลังโหลด Peerland เป็นโปรเจกต์…");
   const res = await fetch(new URL("data/peerland_2024-2025.json", window.location.href));
   if (!res.ok) throw new Error(`โหลด Peerland ไม่สำเร็จ (${res.status})`);
   const payload = await res.json();
-  const rows = Array.isArray(payload.transactions) ? payload.transactions : [];
-  if (!rows.length) throw new Error("ไม่พบรายการ Peerland");
+  const rawRows = Array.isArray(payload.transactions) ? payload.transactions : [];
+  if (!rawRows.length) throw new Error("ไม่พบรายการ Peerland");
+  await new Promise((r) => setTimeout(r, 0));
 
-  const run = () => {
-    if (replace || fresh) {
-      state.transactions = [];
-      state.rules = [];
-    }
-    if (fresh) {
-      state.groupNotes = {};
-      state.categories = [...PEERLAND_CATEGORIES];
-    } else {
-      for (const c of PEERLAND_CATEGORIES) {
-        if (!state.categories.includes(c)) state.categories.push(c);
-      }
-    }
-    state.projectSource = "peerland";
-    state.transactions = dedupeTransactions([
-      ...rows.map((t) => ({
-        ...t,
-        category: fresh ? "" : t.category || "",
-        note: fresh ? "" : t.note || "",
-        source: t.source || "peerland_2024-2025_full.pdf",
-      })),
-      ...state.transactions,
-    ]);
-    state.rules = [];
-    for (const rule of PEERLAND_RULES) {
-      state.rules = upsertRule(state.rules, rule);
-    }
-    const applied = applyRules(state.transactions, state.rules);
-    state.transactions = applied.transactions;
-    state.rules = applied.rules;
-  };
+  let rules = [];
+  for (const rule of PEERLAND_RULES) {
+    rules = upsertRule(rules, rule);
+  }
+  let rows = rawRows.map((t) => ({
+    ...t,
+    category: fresh ? "" : t.category || "",
+    note: fresh ? "" : t.note || "",
+    source: t.source || "peerland_2024-2025_full.pdf",
+  }));
+  const applied = applyRules(rows, rules);
+  rows = applied.transactions;
+  rules = applied.rules;
 
-  if (recordUndo) {
-    const before = cloneStateSlice();
-    run();
-    pushUndo(fresh ? "เคลียร์อ่าน Peerland ใหม่" : "โหลด Peerland", before);
+  const existing = workspace.projects.find((p) => p.projectSource === "peerland" || p.source === "peerland");
+  if (existing && replace) {
+    syncActiveFromState();
+    existing.transactions = rows;
+    existing.rules = rules;
+    existing.categories = [...PEERLAND_CATEGORIES];
+    existing.groupNotes = fresh ? {} : existing.groupNotes || {};
+    existing.projectSource = "peerland";
+    existing.source = "peerland";
+    existing.name = "Peerland 2024–2025";
+    existing.updatedAt = new Date().toISOString();
+    applyProjectToState(existing);
+    clearSessionUi();
   } else {
-    run();
+    createProjectFromRows({
+      name: "Peerland 2024–2025",
+      source: "peerland",
+      rows,
+      categories: [...PEERLAND_CATEGORIES],
+      rules,
+      groupNotes: {},
+    });
   }
 
   schedulePersist();
+  renderProjectSelect();
   renderTable();
   const params = new URLSearchParams(window.location.search);
   params.set("peerland", "1");
   params.delete("demo");
   window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-  toast(`Peerland ${rows.length.toLocaleString("th-TH")} รายการ${fresh ? " · เริ่มใหม่" : ""}`);
+  toast(`โปรเจกต์ Peerland · ${rows.length.toLocaleString("th-TH")} รายการ`);
 }
 
 function updateAuthButton() {
@@ -1072,21 +1220,38 @@ async function setupAuth() {
       try {
         const remote = await pullCloudState(user.uid);
         if (remote && Array.isArray(remote.transactions) && remote.transactions.length) {
-          if (!state.transactions.length || remote.transactions.length >= state.transactions.length) {
-            state.transactions = remote.transactions;
-            if (remote.categories?.length) state.categories = remote.categories;
-            if (remote.rules?.length) state.rules = remote.rules;
-            if (remote.groupNotes) state.groupNotes = remote.groupNotes;
-            if (remote.projectSource) state.projectSource = remote.projectSource;
-            saveState(state);
-            toast("ดึงข้อมูลจาก Firebase แล้ว");
+          const targetId = remote.projectId || remote.activeProjectId || workspace.activeId;
+          let target = workspace.projects.find((p) => p.id === targetId);
+          if (!target) {
+            target = {
+              id: targetId || makeProjectId(),
+              name: remote.projectName || (remote.projectSource === "peerland" ? "Peerland 2024–2025" : "โปรเจกต์คลาวด์"),
+              source: remote.projectSource || "cloud",
+              updatedAt: new Date().toISOString(),
+              ...emptyProjectFields(),
+            };
+            workspace.projects.unshift(target);
+          }
+          const localCount = target.transactions?.length || 0;
+          if (!localCount || remote.transactions.length >= localCount) {
+            target.transactions = remote.transactions;
+            if (remote.categories?.length) target.categories = remote.categories;
+            if (remote.rules?.length) target.rules = remote.rules;
+            if (remote.groupNotes) target.groupNotes = remote.groupNotes;
+            if (remote.projectSource) target.projectSource = remote.projectSource;
+            if (remote.projectName) target.name = remote.projectName;
+            target.updatedAt = new Date().toISOString();
+            applyProjectToState(target);
+            saveState(state, workspace);
+            toast("ดึงโปรเจกต์จาก Firebase แล้ว");
           } else {
-            await pushCloudState(user.uid, state);
+            await pushCloudState(user.uid, state, workspace);
           }
         } else if (state.transactions.length) {
-          await pushCloudState(user.uid, state);
+          await pushCloudState(user.uid, state, workspace);
         }
         setSync(`ซิงค์แล้ว · ${user.email}`);
+        renderProjectSelect();
       } catch (err) {
         console.warn(err);
         setSync(`ล็อกอินแล้ว · ${user.email}`);
@@ -1106,7 +1271,7 @@ async function setupAuth() {
 
 function wireEvents() {
   els.fileInput?.addEventListener("change", (e) => {
-    importFiles(e.target.files);
+    importFiles(e.target.files).catch((err) => toast(err.message || "นำเข้าไม่สำเร็จ"));
     e.target.value = "";
   });
 
@@ -1114,7 +1279,11 @@ function wireEvents() {
   window.addEventListener("drop", (e) => {
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault();
-    importFiles(e.dataTransfer.files);
+    importFiles(e.dataTransfer.files).catch((err) => toast(err.message || "นำเข้าไม่สำเร็จ"));
+  });
+
+  els.projectSelect?.addEventListener("change", () => {
+    switchProject(els.projectSelect.value);
   });
 
   ["input", "change"].forEach((evt) => {

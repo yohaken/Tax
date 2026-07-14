@@ -22,11 +22,15 @@
     <div class="top-actions">
       <button type="button" class="btn solid" id="btn-auth">เข้าสู่ระบบ Google</button>
       <div class="auth-only is-hidden" id="auth-tools">
+        <label class="project-picker" title="เลือกโปรเจกต์">
+          <span class="sr-only">โปรเจกต์</span>
+          <select id="project-select" aria-label="โปรเจกต์"></select>
+        </label>
         <button type="button" class="btn quiet" id="btn-undo" disabled title="เลิกทำ (Ctrl+Z)">เลิกทำ</button>
         <button type="button" class="btn quiet" id="btn-reload-project" title="ล้างแท็ก/Note แล้วอ่านไฟล์โปรเจกต์ใหม่ทั้งหมด">เคลียร์อ่านใหม่</button>
         <button type="button" class="btn quiet" id="btn-peerland">Peerland</button>
         <label class="btn quiet file-btn" for="file-input">
-          นำเข้า
+          นำเข้าโปรเจกต์ใหม่
           <input id="file-input" type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple hidden />
         </label>
         <button type="button" class="btn quiet" id="btn-export">Export XLSX</button>

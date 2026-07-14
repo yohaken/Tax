@@ -116,11 +116,24 @@ export async function pullCloudState(uid) {
     rules: Array.isArray(data.rules) ? data.rules : [],
     groupNotes: data.groupNotes && typeof data.groupNotes === "object" ? data.groupNotes : {},
     projectSource: typeof data.projectSource === "string" ? data.projectSource : "",
+    projectId: typeof data.projectId === "string" ? data.projectId : "",
+    projectName: typeof data.projectName === "string" ? data.projectName : "",
+    activeProjectId: typeof data.activeProjectId === "string" ? data.activeProjectId : "",
+    projectsMeta: Array.isArray(data.projectsMeta) ? data.projectsMeta : [],
     updatedAt: data.updatedAt || null,
   };
 }
 
-export async function pushCloudState(uid, state) {
+export async function pushCloudState(uid, state, workspace) {
+  const projectsMeta = Array.isArray(workspace?.projects)
+    ? workspace.projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        source: p.source || p.projectSource || "",
+        count: Array.isArray(p.transactions) ? p.transactions.length : 0,
+        updatedAt: p.updatedAt || null,
+      }))
+    : [];
   await setDoc(
     stateRef(uid),
     {
@@ -129,6 +142,10 @@ export async function pushCloudState(uid, state) {
       rules: state.rules || [],
       groupNotes: state.groupNotes || {},
       projectSource: state.projectSource || "",
+      projectId: state.projectId || "",
+      projectName: state.projectName || "",
+      activeProjectId: workspace?.activeId || state.projectId || "",
+      projectsMeta,
       updatedAt: serverTimestamp(),
       ownerEmail: ALLOWED_EMAIL,
     },

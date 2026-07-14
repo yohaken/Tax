@@ -1,4 +1,5 @@
 const STORAGE_KEY = "taxtag.v1";
+const WORKSPACE_KEY = "taxtag.workspace.v1";
 
 const DEFAULT_CATEGORIES = [
   "รายได้ / ลูกค้า",
@@ -14,40 +15,164 @@ const DEFAULT_CATEGORIES = [
   "อื่นๆ",
 ];
 
-export function loadState() {
+export function defaultCategories() {
+  return [...DEFAULT_CATEGORIES];
+}
+
+export function emptyProjectFields(overrides = {}) {
+  return {
+    transactions: [],
+    categories: [...DEFAULT_CATEGORIES],
+    rules: [],
+    groupNotes: {},
+    projectSource: "",
+    ...overrides,
+  };
+}
+
+export function makeProjectId() {
+  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeProject(raw, fallbackName = "โปรเจกต์") {
+  const fields = emptyProjectFields({
+    transactions: Array.isArray(raw?.transactions) ? raw.transactions : [],
+    categories:
+      Array.isArray(raw?.categories) && raw.categories.length
+        ? raw.categories
+        : [...DEFAULT_CATEGORIES],
+    rules: Array.isArray(raw?.rules) ? raw.rules : [],
+    groupNotes: raw?.groupNotes && typeof raw.groupNotes === "object" ? raw.groupNotes : {},
+    projectSource: typeof raw?.projectSource === "string" ? raw.projectSource : "",
+  });
+  return {
+    id: typeof raw?.id === "string" && raw.id ? raw.id : makeProjectId(),
+    name: String(raw?.name || fallbackName).trim() || fallbackName,
+    source: typeof raw?.source === "string" ? raw.source : fields.projectSource || "local",
+    updatedAt: raw?.updatedAt || new Date().toISOString(),
+    ...fields,
+  };
+}
+
+function migrateLegacyState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return {
-        transactions: [],
-        categories: [...DEFAULT_CATEGORIES],
-        rules: [],
-        groupNotes: {},
-        projectSource: "",
-      };
-    }
+    if (!raw) return null;
     const data = JSON.parse(raw);
+    if (!data || (!Array.isArray(data.transactions) && !data.categories)) return null;
+    const project = normalizeProject(
+      {
+        ...data,
+        id: "legacy-main",
+        name: data.projectSource === "peerland" ? "Peerland 2024–2025" : data.projectSource === "demo" ? "ตัวอย่างสั้น" : "โปรเจกต์เดิม",
+        source: data.projectSource || "legacy",
+      },
+      "โปรเจกต์เดิม"
+    );
     return {
-      transactions: Array.isArray(data.transactions) ? data.transactions : [],
-      categories: Array.isArray(data.categories) && data.categories.length
-        ? data.categories
-        : [...DEFAULT_CATEGORIES],
-      rules: Array.isArray(data.rules) ? data.rules : [],
-      groupNotes: data.groupNotes && typeof data.groupNotes === "object" ? data.groupNotes : {},
-      projectSource: typeof data.projectSource === "string" ? data.projectSource : "",
+      activeId: project.id,
+      projects: [project],
     };
   } catch {
-    return {
-      transactions: [],
-      categories: [...DEFAULT_CATEGORIES],
-      rules: [],
-      groupNotes: {},
-      projectSource: "",
-    };
+    return null;
   }
 }
 
-export function saveState(state) {
+export function loadWorkspace() {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      const projects = Array.isArray(data.projects)
+        ? data.projects.map((p, i) => normalizeProject(p, `โปรเจกต์ ${i + 1}`))
+        : [];
+      if (projects.length) {
+        const activeId = projects.some((p) => p.id === data.activeId) ? data.activeId : projects[0].id;
+        return { activeId, projects };
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  const migrated = migrateLegacyState();
+  if (migrated) {
+    saveWorkspace(migrated);
+    return migrated;
+  }
+
+  const starter = normalizeProject(
+    {
+      id: makeProjectId(),
+      name: "โปรเจกต์ว่าง",
+      source: "local",
+      ...emptyProjectFields(),
+    },
+    "โปรเจกต์ว่าง"
+  );
+  const ws = { activeId: starter.id, projects: [starter] };
+  saveWorkspace(ws);
+  return ws;
+}
+
+export function saveWorkspace(workspace) {
+  localStorage.setItem(
+    WORKSPACE_KEY,
+    JSON.stringify({
+      activeId: workspace.activeId,
+      projects: workspace.projects,
+      savedAt: new Date().toISOString(),
+    })
+  );
+  // Keep legacy key in sync with active project for older code paths / backup.
+  const active = workspace.projects.find((p) => p.id === workspace.activeId) || workspace.projects[0];
+  if (active) {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        transactions: active.transactions,
+        categories: active.categories,
+        rules: active.rules,
+        groupNotes: active.groupNotes || {},
+        projectSource: active.projectSource || "",
+        projectId: active.id,
+        projectName: active.name,
+        savedAt: new Date().toISOString(),
+      })
+    );
+  }
+}
+
+export function loadState() {
+  const ws = loadWorkspace();
+  const active = ws.projects.find((p) => p.id === ws.activeId) || ws.projects[0];
+  return {
+    transactions: active?.transactions || [],
+    categories: active?.categories?.length ? active.categories : [...DEFAULT_CATEGORIES],
+    rules: active?.rules || [],
+    groupNotes: active?.groupNotes || {},
+    projectSource: active?.projectSource || "",
+    projectId: active?.id || "",
+    projectName: active?.name || "โปรเจกต์",
+  };
+}
+
+export function saveState(state, workspace) {
+  if (workspace) {
+    const active = workspace.projects.find((p) => p.id === workspace.activeId);
+    if (active) {
+      active.transactions = state.transactions || [];
+      active.categories = state.categories || [...DEFAULT_CATEGORIES];
+      active.rules = state.rules || [];
+      active.groupNotes = state.groupNotes || {};
+      active.projectSource = state.projectSource || "";
+      active.source = state.projectSource || active.source || "local";
+      if (state.projectName) active.name = state.projectName;
+      active.updatedAt = new Date().toISOString();
+    }
+    saveWorkspace(workspace);
+    return;
+  }
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
@@ -63,6 +188,7 @@ export function saveState(state) {
 
 export function clearState() {
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(WORKSPACE_KEY);
 }
 
 /** Extract memorable keywords from a description for auto-rules. */
@@ -215,8 +341,14 @@ export function smartSearch(transactions, query) {
     .filter(Boolean);
 }
 
-export function formatMoney(n) {
+export function formatMoney(n, { currency = true } = {}) {
   if (n == null || Number.isNaN(n)) return "—";
+  if (!currency) {
+    return new Intl.NumberFormat("th-TH", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(n);
+  }
   return new Intl.NumberFormat("th-TH", {
     style: "currency",
     currency: "THB",
