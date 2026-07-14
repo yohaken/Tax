@@ -72,8 +72,9 @@ export function watchAuth(callback) {
 }
 
 export async function loginWithGoogle() {
+  if (!auth) throw new Error("Firebase ยังไม่พร้อม");
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ login_hint: ALLOWED_EMAIL });
+  provider.setCustomParameters({ prompt: "select_account", login_hint: ALLOWED_EMAIL });
   let result;
   try {
     if (isMobile()) {
@@ -86,14 +87,24 @@ export async function loginWithGoogle() {
       await signInWithRedirect(auth, provider);
       return null;
     }
-    throw err;
+    // Retry once without custom params if the provider args are rejected.
+    if (err?.code === "auth/argument-error") {
+      const plain = new GoogleAuthProvider();
+      if (isMobile()) {
+        await signInWithRedirect(auth, plain);
+        return null;
+      }
+      result = await signInWithPopup(auth, plain);
+    } else {
+      throw err;
+    }
   }
   const email = (result.user?.email || "").toLowerCase();
   if (email !== ALLOWED_EMAIL.toLowerCase()) {
     await signOut(auth);
-    const err = new Error(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
-    err.code = "auth/email-not-allowed";
-    throw err;
+    const denied = new Error(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
+    denied.code = "auth/email-not-allowed";
+    throw denied;
   }
   return result.user;
 }

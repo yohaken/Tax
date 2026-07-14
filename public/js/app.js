@@ -24,6 +24,7 @@ import {
   pullCloudState,
   pushCloudState,
 } from "./firebase.js";
+import { buildLabel } from "./build.js";
 
 const workspace = loadWorkspace();
 const state = loadState();
@@ -109,6 +110,9 @@ const els = {
   btnPeerlandHero: document.getElementById("btn-peerland-hero"),
   btnDemo: document.getElementById("btn-demo"),
   syncStatus: document.getElementById("sync-status"),
+  buildStamp: document.getElementById("build-stamp"),
+  loginBuild: document.getElementById("login-build"),
+  emptyBuild: document.getElementById("empty-build"),
   toast: document.getElementById("toast"),
   statCount: document.getElementById("stat-count"),
   statUncat: document.getElementById("stat-uncat"),
@@ -124,6 +128,14 @@ function requireLogin(message = "ต้องเข้าสู่ระบบ�
   if (isLoggedIn()) return true;
   toast(message);
   return false;
+}
+
+function paintBuildStamp() {
+  const label = buildLabel();
+  document.title = `TaxTag ${label}`;
+  for (const el of [els.buildStamp, els.loginBuild, els.emptyBuild]) {
+    if (el) el.textContent = label;
+  }
 }
 
 function toast(message) {
@@ -1526,6 +1538,7 @@ function wireEvents() {
 }
 
 wireEvents();
+paintBuildStamp();
 updateUndoButton();
 renderTable();
 setupAuth();
