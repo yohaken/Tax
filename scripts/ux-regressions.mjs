@@ -53,4 +53,27 @@ function followFilterAfterMove(filter, prevCategories, nextCategory) {
   assert(note.includes("ยังไม่มีกลุ่ม"), "uncat stay note");
 }
 
-console.log("PASS ux regressions: rename cell · stay-on-current-group");
+// Sync preferRemote decision (length+timestamp), not length alone
+{
+  function preferRemote({ localCount, remoteCount, localMs, remoteMs }) {
+    return (
+      !localCount ||
+      remoteCount > localCount ||
+      (remoteCount === localCount && remoteMs >= localMs)
+    );
+  }
+  assert(
+    preferRemote({ localCount: 100, remoteCount: 100, localMs: 2000, remoteMs: 1000 }) === false,
+    "newer local same count must win (preserve moves)"
+  );
+  assert(
+    preferRemote({ localCount: 100, remoteCount: 100, localMs: 1000, remoteMs: 2000 }) === true,
+    "newer remote same count pulls"
+  );
+  assert(
+    preferRemote({ localCount: 50, remoteCount: 100, localMs: 9999, remoteMs: 1 }) === true,
+    "more remote rows still prefer remote"
+  );
+}
+
+console.log("PASS ux regressions: rename cell · stay-on-current-group · sync prefer");

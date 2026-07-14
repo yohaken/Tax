@@ -2162,6 +2162,14 @@ async function runPendingLoads() {
   }
 }
 
+function remoteTimeMs(updatedAt) {
+  if (!updatedAt) return 0;
+  if (typeof updatedAt.toMillis === "function") return updatedAt.toMillis();
+  if (typeof updatedAt.seconds === "number") return updatedAt.seconds * 1000 + Math.floor((updatedAt.nanoseconds || 0) / 1e6);
+  const t = Date.parse(updatedAt);
+  return Number.isFinite(t) ? t : 0;
+}
+
 async function setupAuth() {
   try {
     await initFirebase();
@@ -2203,7 +2211,16 @@ async function setupAuth() {
             workspace.projects.unshift(target);
           }
           const localCount = target.transactions?.length || 0;
-          if (!localCount || remote.transactions.length >= localCount) {
+          const remoteCount = remote.transactions.length;
+          const localMs = Date.parse(target.updatedAt || "") || 0;
+          const remoteMs = remoteTimeMs(remote.updatedAt);
+          // Prefer remote only when it has more rows, or same rows and is as new or newer.
+          // Using length alone was overwriting local group moves when counts matched.
+          const preferRemote =
+            !localCount ||
+            remoteCount > localCount ||
+            (remoteCount === localCount && remoteMs >= localMs);
+          if (preferRemote) {
             target.transactions = remote.transactions;
             if (remote.categories?.length) target.categories = remote.categories;
             if (remote.rules?.length) target.rules = remote.rules;
@@ -2638,6 +2655,7 @@ function wireEvents() {
 wireEvents();
 paintBuildStamp();
 updateUndoButton();
+updateClearButtonsChrome();
 renderTable();
 setupAuth();
 
