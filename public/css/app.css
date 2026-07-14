@@ -356,9 +356,21 @@ body {
 .group-table tr.is-merge-picked td {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
+.group-table tr.is-merge-target td {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+.group-merge-target {
+  font-size: 0.85rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
 .group-table .col-check {
   width: 2rem;
   text-align: center;
+}
+.group-table .col-check input {
+  cursor: pointer;
 }
 .period-bar {
   display: flex;

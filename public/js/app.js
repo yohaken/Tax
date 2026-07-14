@@ -54,6 +54,8 @@ let rendering = false;
 let pendingDemo = false;
 const selectedIds = new Set();
 const selectedGroupKeys = new Set();
+/** Existing group key chosen as merge destination (click row / “รวมเข้าที่นี่”). */
+let mergeTargetKey = "";
 let tableSort = { key: "date", dir: "desc" };
 let groupSort = { key: "abs", dir: "desc" };
 let periodMode = "all"; // all | year:YYYY | custom
@@ -105,8 +107,11 @@ const els = {
   groupMergeBar: document.getElementById("group-merge-bar"),
   groupMergeCount: document.getElementById("group-merge-count"),
   groupMergeName: document.getElementById("group-merge-name"),
+  groupMergeTargetLabel: document.getElementById("group-merge-target-label"),
   btnGroupMerge: document.getElementById("btn-group-merge"),
   btnGroupMergeClear: document.getElementById("btn-group-merge-clear"),
+  btnGroupMergeClearTarget: document.getElementById("btn-group-merge-clear-target"),
+  btnGroupSelectAll: document.getElementById("btn-group-select-all"),
   projectNameLabel: document.getElementById("project-name-label"),
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
@@ -214,6 +219,7 @@ function clearSessionUi() {
   updateUndoButton();
   selectedIds.clear();
   selectedGroupKeys.clear();
+  mergeTargetKey = "";
   periodMode = "all";
   if (els.dateFrom) els.dateFrom.value = "";
   if (els.dateTo) els.dateTo.value = "";
@@ -221,7 +227,10 @@ function clearSessionUi() {
   if (els.tableSearch) els.tableSearch.value = "";
   if (els.filterCategory) els.filterCategory.value = "";
   if (els.filterDirection) els.filterDirection.value = "";
-  if (els.groupMergeName) els.groupMergeName.value = "";
+  if (els.groupMergeName) {
+    els.groupMergeName.value = "";
+    els.groupMergeName.readOnly = false;
+  }
   updateGroupMergeBar();
 }
 
@@ -735,86 +744,181 @@ function groupTotals(groups) {
   );
 }
 
-function updateGroupMergeBar() {
-  const n = selectedGroupKeys.size;
-  if (els.groupMergeCount) {
-    els.groupMergeCount.textContent = `เลือก ${n.toLocaleString("th-TH")} กลุ่ม`;
+function listMergeableGroupKeys() {
+  const base = getSummaryBase();
+  const fromTx = summarizeByGroup(base)
+    .map((g) => g.key)
+    .filter((k) => k && k !== "__uncat");
+  const emptyCats = (state.categories || []).filter((c) => c && !isReservedCategoryName(c));
+  return [...new Set([...fromTx, ...emptyCats])];
+}
+
+function getMergeSources() {
+  return [...selectedGroupKeys].filter((k) => k && k !== "__uncat");
+}
+
+function getMergeDestination() {
+  if (mergeTargetKey && !isReservedCategoryName(mergeTargetKey)) return mergeTargetKey;
+  return String(els.groupMergeName?.value || "").trim();
+}
+
+function getMergeMovingKeys(sources, dest) {
+  return sources.filter((k) => k !== dest);
+}
+
+function canMergeGroups() {
+  const sources = getMergeSources();
+  const dest = getMergeDestination();
+  if (!dest || isReservedCategoryName(dest)) return false;
+  return getMergeMovingKeys(sources, dest).length >= 1;
+}
+
+function setMergeTarget(key) {
+  if (!key || key === "__uncat" || isReservedCategoryName(key)) {
+    toast("เลือกกลุ่มปลายทางไม่ได้");
+    return;
   }
+  mergeTargetKey = key;
+  if (els.groupMergeName) {
+    els.groupMergeName.value = key;
+    els.groupMergeName.readOnly = true;
+  }
+  updateGroupMergeBar();
+  renderGroupSummary();
+  toast(`ปลายทาง: รวมเข้า “${key}”`);
+}
+
+function clearMergeTarget({ keepName = false } = {}) {
+  mergeTargetKey = "";
+  if (els.groupMergeName) {
+    els.groupMergeName.readOnly = false;
+    if (!keepName) els.groupMergeName.value = "";
+  }
+  updateGroupMergeBar();
+}
+
+function selectAllMergeableGroups() {
+  const keys = listMergeableGroupKeys();
+  keys.forEach((k) => selectedGroupKeys.add(k));
+  updateGroupMergeBar();
+  renderGroupSummary();
+  toast(`เลือกแล้ว ${keys.length.toLocaleString("th-TH")} กลุ่ม`);
+}
+
+function updateGroupMergeBar() {
+  const sources = getMergeSources();
+  const n = sources.length;
+  const dest = getMergeDestination();
+  const moving = dest ? getMergeMovingKeys(sources, dest) : sources;
+
+  if (els.groupMergeCount) {
+    els.groupMergeCount.textContent =
+      n === 0
+        ? "ยังไม่ได้ติ๊กกลุ่มต้นทาง"
+        : `ต้นทาง ${n.toLocaleString("th-TH")} กลุ่ม` +
+          (dest ? ` · จะย้าย ${moving.length.toLocaleString("th-TH")}` : "");
+  }
+  if (els.groupMergeTargetLabel) {
+    if (mergeTargetKey) {
+      els.groupMergeTargetLabel.hidden = false;
+      els.groupMergeTargetLabel.innerHTML = `ปลายทาง: <strong>${escapeHtml(mergeTargetKey)}</strong>`;
+    } else {
+      els.groupMergeTargetLabel.hidden = true;
+      els.groupMergeTargetLabel.textContent = "";
+    }
+  }
+  if (els.btnGroupMergeClearTarget) {
+    els.btnGroupMergeClearTarget.hidden = !mergeTargetKey;
+  }
+  if (els.groupMergeName) {
+    els.groupMergeName.readOnly = Boolean(mergeTargetKey);
+    els.groupMergeName.placeholder = mergeTargetKey
+      ? "ใช้กลุ่มปลายทางที่คลิกแล้ว"
+      : "พิมพ์ชื่อกลุ่มใหม่ หรือคลิก “รวมเข้าที่นี่” ที่แถวปลายทาง";
+  }
+  // Keep bar visible whenever workspace has groups so select-all is reachable
   if (els.groupMergeBar) {
-    els.groupMergeBar.hidden = n === 0;
+    const hasGroups = listMergeableGroupKeys().length > 0 && state.transactions.length > 0;
+    els.groupMergeBar.hidden = !hasGroups;
   }
   if (els.btnGroupMerge) {
-    els.btnGroupMerge.disabled = n < 2;
+    els.btnGroupMerge.disabled = !canMergeGroups();
+  }
+  if (els.btnGroupSelectAll) {
+    const allKeys = listMergeableGroupKeys();
+    const allSelected = allKeys.length > 0 && allKeys.every((k) => selectedGroupKeys.has(k));
+    els.btnGroupSelectAll.textContent = allSelected ? "ติ๊กออกทั้งหมด" : "เลือกทุกกลุ่ม";
+    els.btnGroupSelectAll.dataset.mode = allSelected ? "clear" : "all";
   }
 }
 
 function mergeSelectedGroups() {
   if (!requireLogin()) return;
-  const keys = [...selectedGroupKeys].filter((k) => k && k !== "__uncat");
-  if (keys.length < 2) {
-    toast("เลือกอย่างน้อย 2 กลุ่มเพื่อรวม");
-    return;
-  }
-  const next = String(els.groupMergeName?.value || "").trim();
-  if (!next) {
-    toast("ใส่ชื่อกลุ่มใหม่");
+  const sources = getMergeSources();
+  const dest = getMergeDestination();
+  if (!dest) {
+    toast("เลือกปลายทาง: คลิก “รวมเข้าที่นี่” หรือพิมพ์ชื่อกลุ่มใหม่");
     els.groupMergeName?.focus();
     return;
   }
-  if (isReservedCategoryName(next)) {
+  if (isReservedCategoryName(dest)) {
     toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
     return;
   }
-  const busyOutside = state.transactions.some(
-    (t) => t.category === next && !keys.includes(t.category)
-  );
-  // next may equal one of the source keys (merge others into it) — that is OK
-  if (busyOutside && !keys.includes(next)) {
-    toast(`มีกลุ่ม “${next}” อยู่แล้ว และไม่ได้ถูกเลือก — เลือกกลุ่มนั้นด้วยหรือใช้ชื่ออื่น`);
+  const moving = getMergeMovingKeys(sources, dest);
+  if (!moving.length) {
+    toast("ติ๊กกลุ่มต้นทางอย่างน้อย 1 กลุ่ม (คนละกลุ่มกับปลายทาง)");
     return;
   }
 
-  const counts = keys.map((k) => state.transactions.filter((t) => t.category === k).length);
-  const totalRows = counts.reduce((s, n) => s + n, 0);
+  // Destination may be an existing group that was NOT ticked — that is intentional.
+  const allKeys = [...new Set([...moving, dest])];
+  const counts = moving.map((k) => state.transactions.filter((t) => t.category === k).length);
+  const destCount = state.transactions.filter((t) => t.category === dest).length;
+  const totalMove = counts.reduce((s, n) => s + n, 0);
+  const intoExisting = state.categories.includes(dest) || destCount > 0 || Boolean(mergeTargetKey);
+
   const ok = window.confirm(
-    `รวม ${keys.length} กลุ่ม → “${next}”?\n\n` +
-      keys.map((k, i) => `· ${k} (${counts[i].toLocaleString("th-TH")})`).join("\n") +
-      `\n\nรวม ${totalRows.toLocaleString("th-TH")} รายการ · กดเลิกทำได้`
+    `ย้าย ${moving.length.toLocaleString("th-TH")} กลุ่ม → “${dest}”` +
+      (intoExisting ? " (กลุ่มที่มีอยู่)" : " (ชื่อใหม่)") +
+      `?\n\n` +
+      moving.map((k, i) => `· ${k} (${counts[i].toLocaleString("th-TH")})`).join("\n") +
+      `\n\nปลายทาง “${dest}” ตอนนี้ ${destCount.toLocaleString("th-TH")} รายการ` +
+      `\nจะได้รวม ${ (destCount + totalMove).toLocaleString("th-TH") } รายการ · กดเลิกทำได้`
   );
   if (!ok) return;
 
-  withUndo(`รวมกลุ่มเป็น “${next}”`, () => {
+  withUndo(`รวมกลุ่มเข้า “${dest}”`, () => {
     for (const t of state.transactions) {
-      if (keys.includes(t.category)) t.category = next;
+      if (moving.includes(t.category)) t.category = dest;
     }
     for (const r of state.rules) {
-      if (keys.includes(r.category)) r.category = next;
+      if (moving.includes(r.category)) r.category = dest;
     }
-    const noteParts = keys
+    const noteParts = allKeys
       .map((k) => String(state.groupNotes?.[k] || "").trim())
       .filter(Boolean);
     if (noteParts.length) {
-      state.groupNotes[next] = [...new Set(noteParts)].join(" · ");
+      state.groupNotes[dest] = [...new Set(noteParts)].join(" · ");
     }
-    for (const k of keys) {
-      if (k === next) continue;
+    for (const k of moving) {
       delete state.groupNotes[k];
       if (state.groupNicknames) delete state.groupNicknames[k];
     }
     state.categories = [
-      next,
-      ...state.categories.filter((c) => c !== next && !keys.includes(c)),
+      dest,
+      ...state.categories.filter((c) => c !== dest && !moving.includes(c)),
     ];
-    if (els.filterCategory && keys.includes(els.filterCategory.value)) {
-      els.filterCategory.value = next;
+    if (els.filterCategory && (moving.includes(els.filterCategory.value) || els.filterCategory.value === dest)) {
+      els.filterCategory.value = dest;
     }
   });
   selectedGroupKeys.clear();
-  if (els.groupMergeName) els.groupMergeName.value = "";
+  clearMergeTarget();
   updateGroupMergeBar();
   schedulePersist();
   scheduleRender();
-  toast(`รวมเป็น “${next}” แล้ว · ${totalRows.toLocaleString("th-TH")} รายการ`);
+  toast(`รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`);
 }
 
 function renderGroupSummary() {
@@ -835,7 +939,14 @@ function renderGroupSummary() {
   const head = `
     <thead>
       <tr>
-        <th class="col-check" title="ติ๊กเพื่อรวมกลุ่ม"></th>
+        <th class="col-check">
+          <input type="checkbox" id="group-check-all" title="เลือก/ติ๊กออกทุกกลุ่ม" ${
+            (() => {
+              const keys = listMergeableGroupKeys();
+              return keys.length && keys.every((k) => selectedGroupKeys.has(k)) ? "checked" : "";
+            })()
+          } />
+        </th>
         <th><button type="button" class="th-sort${groupSort.key === "name" ? " is-active" : ""}" data-group-sort="name">กลุ่ม${groupSortMarker("name")}</button></th>
         <th class="num"><button type="button" class="th-sort${groupSort.key === "count" ? " is-active" : ""}" data-group-sort="count">จำนวน${groupSortMarker("count")}</button></th>
         <th class="num"><button type="button" class="th-sort${groupSort.key === "in" ? " is-active" : ""}" data-group-sort="in">เงินเข้า${groupSortMarker("in")}</button></th>
@@ -852,19 +963,32 @@ function renderGroupSummary() {
       const gNote = state.groupNotes?.[g.key] || "";
       const canMerge = g.key !== "__uncat";
       const checked = canMerge && selectedGroupKeys.has(g.key) ? "checked" : "";
-      return `<tr class="${isActive ? "is-active" : ""}${selectedGroupKeys.has(g.key) ? " is-merge-picked" : ""}" data-group="${escapeHtml(g.key)}">
+      const isTarget = canMerge && mergeTargetKey === g.key;
+      const rowClass = [
+        isActive ? "is-active" : "",
+        selectedGroupKeys.has(g.key) ? "is-merge-picked" : "",
+        isTarget ? "is-merge-target" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `<tr class="${rowClass}" data-group="${escapeHtml(g.key)}">
         <td class="col-check">${
           canMerge
-            ? `<input type="checkbox" data-group-check="${escapeHtml(g.key)}" ${checked} title="เลือกเพื่อรวมกลุ่ม" />`
+            ? `<input type="checkbox" data-group-check="${escapeHtml(g.key)}" ${checked} title="ติ๊กเป็นต้นทางที่จะย้าย" />`
             : ""
         }</td>
         <td>
           <div class="group-title-row">
-            <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}" title="${escapeHtml(g.name)}">${escapeHtml(displayGroupName(g))}</button>
+            <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}" title="${escapeHtml(g.name)}">${escapeHtml(displayGroupName(g))}${isTarget ? " · ปลายทาง" : ""}</button>
             ${
               g.key === "__uncat"
                 ? ""
                 : `<button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(g.key)}" title="เปลี่ยนชื่อกลุ่มในรายการ">เปลี่ยนชื่อ</button>`
+            }
+            ${
+              canMerge
+                ? `<button type="button" class="btn ${isTarget ? "solid" : "quiet"} tiny" data-merge-target="${escapeHtml(g.key)}" title="ตั้งเป็นกลุ่มปลายทางที่ต้องการรวมเข้า">${isTarget ? "ปลายทาง✓" : "รวมเข้าที่นี่"}</button>`
+                : ""
             }
           </div>
         </td>
@@ -889,12 +1013,21 @@ function renderGroupSummary() {
   const emptyBody = emptyCats
     .map((c) => {
       const checked = selectedGroupKeys.has(c) ? "checked" : "";
-      return `<tr class="is-empty-group${selectedGroupKeys.has(c) ? " is-merge-picked" : ""}" data-group="${escapeHtml(c)}">
-        <td class="col-check"><input type="checkbox" data-group-check="${escapeHtml(c)}" ${checked} title="เลือกเพื่อรวมกลุ่ม" /></td>
+      const isTarget = mergeTargetKey === c;
+      const rowClass = [
+        "is-empty-group",
+        selectedGroupKeys.has(c) ? "is-merge-picked" : "",
+        isTarget ? "is-merge-target" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `<tr class="${rowClass}" data-group="${escapeHtml(c)}">
+        <td class="col-check"><input type="checkbox" data-group-check="${escapeHtml(c)}" ${checked} title="ติ๊กเป็นต้นทางที่จะย้าย" /></td>
         <td>
           <div class="group-title-row">
-            <span class="group-title-btn muted">${escapeHtml(c)}</span>
+            <span class="group-title-btn muted">${escapeHtml(c)}${isTarget ? " · ปลายทาง" : ""}</span>
             <button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(c)}" title="เปลี่ยนชื่อกลุ่ม">เปลี่ยนชื่อ</button>
+            <button type="button" class="btn ${isTarget ? "solid" : "quiet"} tiny" data-merge-target="${escapeHtml(c)}" title="ตั้งเป็นกลุ่มปลายทาง">${isTarget ? "ปลายทาง✓" : "รวมเข้าที่นี่"}</button>
           </div>
         </td>
         <td class="num">0</td>
@@ -922,6 +1055,16 @@ function renderGroupSummary() {
   </tfoot>`;
 
   els.groupList.innerHTML = `<table class="group-table">${head}<tbody>${body}${emptyBody}</tbody>${foot}</table>`;
+
+  const checkAll = els.groupList.querySelector("#group-check-all");
+  checkAll?.addEventListener("change", () => {
+    const keys = listMergeableGroupKeys();
+    if (checkAll.checked) keys.forEach((k) => selectedGroupKeys.add(k));
+    else keys.forEach((k) => selectedGroupKeys.delete(k));
+    updateGroupMergeBar();
+    renderGroupSummary();
+  });
+
   updateGroupMergeBar();
 }
 
@@ -2018,6 +2161,12 @@ function wireEvents() {
       return;
     }
     if (e.target.closest("[data-group-check]")) return;
+    const mergeTargetBtn = e.target.closest("[data-merge-target]");
+    if (mergeTargetBtn) {
+      e.preventDefault();
+      setMergeTarget(mergeTargetBtn.getAttribute("data-merge-target"));
+      return;
+    }
     const renameBtn = e.target.closest("[data-rename-group]");
     if (renameBtn) {
       beginRenameGroup(renameBtn.getAttribute("data-rename-group"));
@@ -2031,7 +2180,14 @@ function wireEvents() {
     if (e.target.closest("[data-group-note]") || e.target.closest("[data-rename-form]")) return;
     const filterBtn = e.target.closest("[data-filter-group]");
     if (filterBtn) {
-      els.filterCategory.value = filterBtn.getAttribute("data-filter-group");
+      const key = filterBtn.getAttribute("data-filter-group");
+      const isTitle = filterBtn.classList.contains("group-title-btn");
+      // UX: when sources are ticked, clicking a group name picks merge destination
+      if (isTitle && getMergeSources().length > 0 && key && key !== "__uncat") {
+        setMergeTarget(key);
+        return;
+      }
+      els.filterCategory.value = key;
       scheduleRender();
       return;
     }
@@ -2158,9 +2314,28 @@ function wireEvents() {
   els.btnGroupMerge?.addEventListener("click", () => mergeSelectedGroups());
   els.btnGroupMergeClear?.addEventListener("click", () => {
     selectedGroupKeys.clear();
-    if (els.groupMergeName) els.groupMergeName.value = "";
+    clearMergeTarget();
     updateGroupMergeBar();
     renderGroupSummary();
+  });
+  els.btnGroupMergeClearTarget?.addEventListener("click", () => {
+    clearMergeTarget();
+    renderGroupSummary();
+    toast("เคลียร์ปลายทางแล้ว — พิมพ์ชื่อใหม่ได้");
+  });
+  els.btnGroupSelectAll?.addEventListener("click", () => {
+    const mode = els.btnGroupSelectAll.dataset.mode || "all";
+    if (mode === "clear") {
+      selectedGroupKeys.clear();
+      updateGroupMergeBar();
+      renderGroupSummary();
+      return;
+    }
+    selectAllMergeableGroups();
+  });
+  els.groupMergeName?.addEventListener("input", () => {
+    if (mergeTargetKey) return;
+    updateGroupMergeBar();
   });
   els.btnRenameProject?.addEventListener("click", renameActiveProject);
   els.btnDeleteProject?.addEventListener("click", deleteActiveProject);
