@@ -34,6 +34,9 @@
   </header>
 
   <main class="layout">
+    <div id="test-banner" class="banner-test is-hidden" role="status">
+      โหมดทดสอบ — โหลดข้อมูลตัวอย่างแล้ว ลองค้นหาหรือกดติดป้ายได้เลย
+    </div>
     <section class="intro" id="empty-state">
       <h1>ใส่ป้ายให้ทุกบรรทัดใน statement</h1>
       <p>
@@ -44,7 +47,11 @@
         <strong>ลากไฟล์มาวางที่นี่</strong>
         <span>รองรับ PDF · Excel (.xlsx/.xls) · CSV</span>
       </div>
-      <p class="sample-link">ยังไม่มีไฟล์? <a href="/sample-statement.csv" download>ดาวน์โหลด CSV ตัวอย่าง</a> แล้วลากกลับมาลอง</p>
+      <div class="cta-row">
+        <button type="button" class="btn primary" id="btn-demo">เริ่มทดสอบทันที</button>
+        <a class="btn ghost" href="sample-statement.csv" download>ดาวน์โหลด CSV ตัวอย่าง</a>
+      </div>
+      <p class="sample-link">คลิก “เริ่มทดสอบทันที” เพื่อโหลดข้อมูลตัวอย่างให้ลองค้นหาและติดป้ายได้เลย — ไม่ต้องเลือกไฟล์</p>
     </section>
 
     <section class="workspace is-hidden" id="workspace" aria-live="polite">

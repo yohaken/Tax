@@ -218,6 +218,30 @@ body {
   font-weight: 600;
 }
 
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 1.1rem;
+}
+
+.cta-row .btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.banner-test {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(201, 134, 42, 0.16);
+  border: 1px solid rgba(201, 134, 42, 0.35);
+  color: #6b4810;
+  font-size: 0.9rem;
+}
+
 .dropzone:hover,
 .dropzone:focus-visible,
 .dropzone.is-drag {

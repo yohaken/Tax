@@ -45,6 +45,7 @@ const els = {
   btnClear: document.getElementById("btn-clear"),
   btnApplyRules: document.getElementById("btn-apply-rules"),
   btnBulkTag: document.getElementById("btn-bulk-tag"),
+  btnDemo: document.getElementById("btn-demo"),
   toast: document.getElementById("toast"),
   statCount: document.getElementById("stat-count"),
   statUncat: document.getElementById("stat-uncat"),
@@ -219,6 +220,73 @@ async function importFiles(fileList) {
   renderTable();
   toast(`นำเข้า ${imported.length} รายการ${applied.applied ? ` · ติดป้ายอัตโนมัติ ${applied.applied}` : ""}`);
   if (errors.length) toast(`บางไฟล์มีปัญหา: ${errors[0]}`);
+}
+
+async function startDemo({ replace = false } = {}) {
+  toast("กำลังโหลดข้อมูลทดสอบ…");
+  try {
+    const res = await fetch(new URL("sample-statement.csv", window.location.href));
+    if (!res.ok) throw new Error(`โหลดตัวอย่างไม่สำเร็จ (${res.status})`);
+    const text = await res.text();
+    const file = new File([text], "sample-statement.csv", { type: "text/csv" });
+    if (replace) {
+      state.transactions = [];
+      state.rules = [];
+      selectedIds.clear();
+    }
+    await importFiles([file]);
+
+    // Seed a couple of tags so test users see smart rules immediately
+    const coffee = state.transactions.find((t) => /ร้านกาแฟ|กาแฟบ้านสวน/i.test(t.description));
+    const grab = state.transactions.find((t) => /grab food/i.test(t.description));
+    const rent = state.transactions.find((t) => /ค่าเช่า/i.test(t.description));
+    if (coffee && !coffee.category) {
+      coffee.category = "ค่าอาหาร";
+      coffee.note = "ตัวอย่างป้ายอัตโนมัติ";
+      state.rules = upsertRule(state.rules, {
+        keywords: extractKeywords(coffee.description),
+        category: "ค่าอาหาร",
+      });
+    }
+    if (grab && !grab.category) {
+      grab.category = "ค่าอาหาร";
+      grab.note = "ตัวอย่าง";
+      state.rules = upsertRule(state.rules, {
+        keywords: extractKeywords(grab.description),
+        category: "ค่าอาหาร",
+      });
+    }
+    if (rent && !rent.category) {
+      rent.category = "ค่าเช่า";
+      rent.note = "ตัวอย่าง";
+      state.rules = upsertRule(state.rules, {
+        keywords: extractKeywords(rent.description),
+        category: "ค่าเช่า",
+      });
+    }
+    const applied = applyRules(state.transactions, state.rules);
+    state.transactions = applied.transactions;
+    state.rules = applied.rules;
+    persist();
+    renderTable();
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("demo", "1");
+    const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", next);
+    document.getElementById("test-banner")?.classList.remove("is-hidden");
+    toast("โหมดทดสอบพร้อมแล้ว — ลองค้นหาหรือติดป้ายได้เลย");
+  } catch (err) {
+    console.error(err);
+    toast(err.message || "เริ่มทดสอบไม่สำเร็จ");
+  }
+}
+
+function shouldAutostartDemo() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("demo") === "1" || params.get("test") === "1") return true;
+  if (window.location.hash === "#demo") return true;
+  return false;
 }
 
 function openTagDialog(ids) {
@@ -424,7 +492,15 @@ function wireEvents() {
     renderTable();
     toast("ล้างข้อมูลแล้ว");
   });
+
+  els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }));
 }
 
 wireEvents();
 renderTable();
+
+if (!state.transactions.length && shouldAutostartDemo()) {
+  startDemo({ replace: true });
+} else if (!state.transactions.length) {
+  // First-visit test path: open with empty data shows CTA; auto demo on ?demo=1 only
+}

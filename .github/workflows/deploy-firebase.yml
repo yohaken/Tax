@@ -1,0 +1,41 @@
+name: Deploy TaxTag to Firebase Hosting
+
+# One-time setup (owner):
+# 1) Create Firebase project → enable Hosting
+# 2) npx firebase-tools login:ci  → copy token
+# 3) Repo Settings → Secrets: FIREBASE_TOKEN, FIREBASE_PROJECT_ID
+# Then every push to main deploys to https://<project-id>.web.app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Firebase secrets
+        id: check
+        env:
+          TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$PROJECT_ID" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Missing FIREBASE_TOKEN or FIREBASE_PROJECT_ID — skip deploy."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "project=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy Hosting
+        if: steps.check.outputs.skip == 'false'
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          npm i -g firebase-tools
+          printf '%s\n' '{"projects":{"default":"'"${{ steps.check.outputs.project }}"'"}}' > .firebaserc
+          firebase deploy --only hosting --token "$FIREBASE_TOKEN" --project "${{ steps.check.outputs.project }}" --non-interactive
