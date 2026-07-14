@@ -25,13 +25,18 @@ import {
 const state = loadState();
 let currentUser = null;
 let cloudReady = false;
+let authReady = false;
 let persistTimer = null;
 let searchTimer = null;
 let rendering = false;
+let pendingPeerland = false;
+let pendingDemo = false;
 
 const els = {
+  loginGate: document.getElementById("login-gate"),
   empty: document.getElementById("empty-state"),
   workspace: document.getElementById("workspace"),
+  authTools: document.getElementById("auth-tools"),
   fileInput: document.getElementById("file-input"),
   search: document.getElementById("search-input"),
   dateFrom: document.getElementById("date-from"),
@@ -45,6 +50,7 @@ const els = {
   printRoot: document.getElementById("print-root"),
   btnExport: document.getElementById("btn-export"),
   btnAuth: document.getElementById("btn-auth"),
+  btnAuthHero: document.getElementById("btn-auth-hero"),
   btnPeerland: document.getElementById("btn-peerland"),
   btnPeerlandHero: document.getElementById("btn-peerland-hero"),
   btnDemo: document.getElementById("btn-demo"),
@@ -55,6 +61,16 @@ const els = {
   statIn: document.getElementById("stat-in"),
   statOut: document.getElementById("stat-out"),
 };
+
+function isLoggedIn() {
+  return Boolean(currentUser);
+}
+
+function requireLogin(message = "ต้องเข้าสู่ระบบก่อน") {
+  if (isLoggedIn()) return true;
+  toast(message);
+  return false;
+}
 
 function toast(message) {
   els.toast.textContent = message;
@@ -201,6 +217,7 @@ function groupTitle(groupKey) {
 }
 
 function printGroup(groupKey) {
+  if (!requireLogin()) return;
   const rows = rowsForGroup(groupKey).sort(
     (a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0)
   );
@@ -255,6 +272,7 @@ function printGroup(groupKey) {
 }
 
 function exportGroup(groupKey) {
+  if (!requireLogin()) return;
   const rows = rowsForGroup(groupKey);
   if (!rows.length) {
     toast("กลุ่มนี้ยังไม่มีรายการ");
@@ -267,10 +285,42 @@ function exportGroup(groupKey) {
 function renderTable() {
   if (rendering) return;
   rendering = true;
+
+  // Lock all data behind login
+  if (!authReady) {
+    els.loginGate?.classList.remove("is-hidden");
+    els.empty?.classList.add("is-hidden");
+    els.workspace?.classList.add("is-hidden");
+    els.authTools?.classList.add("is-hidden");
+    setSync("กำลังตรวจสอบสิทธิ์…");
+    rendering = false;
+    return;
+  }
+
+  if (!isLoggedIn()) {
+    els.loginGate?.classList.remove("is-hidden");
+    els.empty?.classList.add("is-hidden");
+    els.workspace?.classList.add("is-hidden");
+    els.authTools?.classList.add("is-hidden");
+    if (els.txBody) els.txBody.innerHTML = "";
+    if (els.groupList) els.groupList.innerHTML = "";
+    setSync("ต้องเข้าสู่ระบบก่อน");
+    rendering = false;
+    return;
+  }
+
+  els.loginGate?.classList.add("is-hidden");
+  els.authTools?.classList.remove("is-hidden");
+
   const hasData = state.transactions.length > 0;
   els.empty.classList.toggle("is-hidden", hasData);
   els.workspace.classList.toggle("is-hidden", !hasData);
   refreshCategoryOptions();
+
+  if (!hasData) {
+    rendering = false;
+    return;
+  }
 
   const visible = getFiltered();
   const MAX = 400;
@@ -324,6 +374,7 @@ function patchTx(id, patch, { learn = false } = {}) {
 }
 
 async function importFiles(fileList) {
+  if (!requireLogin("ต้องเข้าสู่ระบบก่อนจึงจะนำเข้าไฟล์ได้")) return;
   const files = [...fileList].filter(Boolean);
   if (!files.length) return;
   toast(`กำลังอ่าน ${files.length} ไฟล์…`);
@@ -352,6 +403,7 @@ async function importFiles(fileList) {
 }
 
 async function startDemo({ replace = true } = {}) {
+  if (!requireLogin()) return;
   toast("กำลังโหลดตัวอย่าง…");
   const res = await fetch(new URL("sample-statement.csv", window.location.href));
   if (!res.ok) throw new Error("โหลดตัวอย่างไม่สำเร็จ");
@@ -364,6 +416,7 @@ async function startDemo({ replace = true } = {}) {
 }
 
 async function startPeerland({ replace = true } = {}) {
+  if (!requireLogin()) return;
   toast("กำลังโหลด Peerland…");
   const res = await fetch(new URL("data/peerland_2024-2025.json", window.location.href));
   if (!res.ok) throw new Error(`โหลด Peerland ไม่สำเร็จ (${res.status})`);
@@ -430,10 +483,31 @@ function updateAuthButton() {
   if (!els.btnAuth) return;
   if (currentUser) {
     els.btnAuth.textContent = "ออกจากระบบ";
+    els.btnAuth.classList.remove("solid");
+    els.btnAuth.classList.add("quiet");
     els.btnAuth.title = currentUser.email;
   } else {
     els.btnAuth.textContent = "เข้าสู่ระบบ Google";
+    els.btnAuth.classList.add("solid");
+    els.btnAuth.classList.remove("quiet");
     els.btnAuth.title = ALLOWED_EMAIL;
+  }
+}
+
+async function runPendingLoads() {
+  if (!isLoggedIn()) return;
+  if (pendingPeerland || new URLSearchParams(location.search).get("peerland") === "1") {
+    pendingPeerland = false;
+    if (!state.transactions.length) {
+      await startPeerland({ replace: true }).catch((err) => toast(err.message));
+      return;
+    }
+  }
+  if (pendingDemo || new URLSearchParams(location.search).get("demo") === "1") {
+    pendingDemo = false;
+    if (!state.transactions.length) {
+      await startDemo({ replace: true }).catch((err) => toast(err.message));
+    }
   }
 }
 
@@ -445,28 +519,30 @@ async function setupAuth() {
       if (user && (user.email || "").toLowerCase() !== ALLOWED_EMAIL.toLowerCase()) {
         await logoutFirebase();
         currentUser = null;
+        authReady = true;
         updateAuthButton();
         setSync("อนุญาตเฉพาะบัญชีเจ้าของ");
         toast(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
+        renderTable();
         return;
       }
       currentUser = user;
+      authReady = true;
       updateAuthButton();
       if (!user) {
-        setSync("บันทึกอัตโนมัติในเครื่อง");
+        setSync("ต้องเข้าสู่ระบบก่อน");
+        renderTable();
         return;
       }
       setSync(`เข้าสู่ระบบแล้ว · ${user.email}`);
       try {
         const remote = await pullCloudState(user.uid);
         if (remote && Array.isArray(remote.transactions) && remote.transactions.length) {
-          // Prefer richer cloud copy when local empty or remote newer-ish larger
           if (!state.transactions.length || remote.transactions.length >= state.transactions.length) {
             state.transactions = remote.transactions;
             if (remote.categories?.length) state.categories = remote.categories;
             if (remote.rules?.length) state.rules = remote.rules;
             saveState(state);
-            renderTable();
             toast("ดึงข้อมูลจาก Firebase แล้ว");
           } else {
             await pushCloudState(user.uid, state);
@@ -479,11 +555,16 @@ async function setupAuth() {
         console.warn(err);
         setSync(`ล็อกอินแล้ว · ซิงค์คลาวด์รอตั้งกฎ Firestore`);
       }
+      renderTable();
+      await runPendingLoads();
     });
   } catch (err) {
     console.warn(err);
     cloudReady = false;
-    setSync("โหมดออฟไลน์ · บันทึกในเครื่อง");
+    authReady = true;
+    currentUser = null;
+    setSync("ล็อกอินไม่พร้อม · ตรวจ Firebase");
+    renderTable();
   }
 }
 
@@ -551,6 +632,7 @@ function wireEvents() {
   });
 
   els.btnExport.addEventListener("click", () => {
+    if (!requireLogin()) return;
     const rows = getFiltered();
     if (!rows.length) {
       toast("ยังไม่มีข้อมูลให้ Export");
@@ -560,7 +642,7 @@ function wireEvents() {
     toast(`Export XLSX · ${rows.length.toLocaleString("th-TH")} รายการ`);
   });
 
-  els.btnAuth.addEventListener("click", async () => {
+  async function handleAuthClick() {
     try {
       if (currentUser) {
         await logoutFirebase();
@@ -573,7 +655,10 @@ function wireEvents() {
       console.error(err);
       toast(err.message || "ล็อกอินไม่สำเร็จ");
     }
-  });
+  }
+
+  els.btnAuth?.addEventListener("click", handleAuthClick);
+  els.btnAuthHero?.addEventListener("click", handleAuthClick);
 
   const goPeerland = () => startPeerland({ replace: true }).catch((err) => toast(err.message));
   const goDemo = () => startDemo({ replace: true }).catch((err) => toast(err.message));
@@ -586,9 +671,11 @@ wireEvents();
 renderTable();
 setupAuth();
 
-const params = new URLSearchParams(window.location.search);
-if (params.get("peerland") === "1" || location.hash === "#peerland") {
-  startPeerland({ replace: true }).catch((err) => toast(err.message));
-} else if (!state.transactions.length && (params.get("demo") === "1" || location.hash === "#demo")) {
-  startDemo({ replace: true }).catch((err) => toast(err.message));
+{
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("peerland") === "1" || location.hash === "#peerland") {
+    pendingPeerland = true;
+  } else if (params.get("demo") === "1" || location.hash === "#demo") {
+    pendingDemo = true;
+  }
 }

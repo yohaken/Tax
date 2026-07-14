@@ -52,7 +52,14 @@ body {
   flex-wrap: wrap;
   gap: 0.4rem;
   justify-content: flex-end;
+  align-items: center;
 }
+.auth-only {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.auth-only.is-hidden { display: none !important; }
 
 .btn {
   appearance: none;

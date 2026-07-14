@@ -19,25 +19,35 @@
       <span class="brand-sub" id="sync-status">พร้อมใช้งาน</span>
     </div>
     <div class="top-actions">
-      <button type="button" class="btn quiet" id="btn-auth">เข้าสู่ระบบ Google</button>
-      <button type="button" class="btn quiet" id="btn-peerland">Peerland</button>
-      <label class="btn quiet file-btn" for="file-input">
-        นำเข้า
-        <input id="file-input" type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple hidden />
-      </label>
-      <button type="button" class="btn solid" id="btn-export">Export XLSX</button>
+      <button type="button" class="btn solid" id="btn-auth">เข้าสู่ระบบ Google</button>
+      <div class="auth-only is-hidden" id="auth-tools">
+        <button type="button" class="btn quiet" id="btn-peerland">Peerland</button>
+        <label class="btn quiet file-btn" for="file-input">
+          นำเข้า
+          <input id="file-input" type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple hidden />
+        </label>
+        <button type="button" class="btn quiet" id="btn-export">Export XLSX</button>
+      </div>
     </div>
   </header>
 
   <main class="shell">
-    <section class="hero" id="empty-state">
+    <section class="hero" id="login-gate">
+      <h1>TaxTag</h1>
+      <p>ข้อมูลส่วนตัว — ต้องเข้าสู่ระบบก่อนจึงจะเห็นรายการและสรุปกลุ่ม</p>
+      <div class="hero-actions">
+        <button type="button" class="btn solid" id="btn-auth-hero">เข้าสู่ระบบด้วย Google</button>
+      </div>
+      <p class="fine">อนุญาตเฉพาะ <strong>yohaken@gmail.com</strong> · ล็อกอินครั้งเดียว จำไว้ในเครื่องยาวๆ</p>
+    </section>
+
+    <section class="hero is-hidden" id="empty-state">
       <h1>TaxTag</h1>
       <p>จำแนกรายการเป็นกลุ่ม พร้อมสรุปยอดแยก — พิมพ์ Note ได้เลย ไม่ต้องกดบันทึก</p>
       <div class="hero-actions">
         <button type="button" class="btn solid" id="btn-peerland-hero">เปิด Peerland 2024–2025</button>
         <button type="button" class="btn quiet" id="btn-demo">ตัวอย่างสั้น</button>
       </div>
-      <p class="fine">ล็อกอินด้วย <strong>yohaken@gmail.com</strong> ครั้งเดียว ซิงค์หมวด/คอมเมนต์ข้ามเครื่อง</p>
     </section>
 
     <section class="workspace is-hidden" id="workspace">
