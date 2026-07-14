@@ -272,6 +272,45 @@ body {
   font-size: 1.05rem;
   letter-spacing: -0.02em;
 }
+.project-nick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  margin: 0 0 0.55rem;
+}
+.project-nick-row label {
+  color: var(--mute);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.project-nick-row input {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.4rem 0.65rem;
+  font: inherit;
+  font-weight: 650;
+  color: var(--ink);
+}
+.file-hint {
+  color: var(--mute);
+  font-size: 0.78rem;
+}
+.group-nick {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.28rem 0.45rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
 .group-summary-actions {
   display: flex;
   flex-wrap: wrap;

@@ -29,8 +29,10 @@ import { buildLabel } from "./build.js";
 const workspace = loadWorkspace();
 const state = loadState();
 if (!state.groupNotes) state.groupNotes = {};
+if (!state.groupNicknames) state.groupNicknames = {};
 if (!state.projectSource) state.projectSource = "";
 if (!state.projectName) state.projectName = "โปรเจกต์";
+if (!state.fileName) state.fileName = "";
 if (!state.projectId) state.projectId = workspace.activeId;
 
 let currentUser = null;
@@ -39,7 +41,6 @@ let authReady = false;
 let persistTimer = null;
 let searchTimer = null;
 let rendering = false;
-let pendingPeerland = false;
 let pendingDemo = false;
 const selectedIds = new Set();
 let tableSort = { key: "date", dir: "desc" };
@@ -107,9 +108,10 @@ const els = {
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
   btnAuthHero: document.getElementById("btn-auth-hero"),
-  btnPeerland: document.getElementById("btn-peerland"),
-  btnPeerlandHero: document.getElementById("btn-peerland-hero"),
   btnDemo: document.getElementById("btn-demo"),
+  fileInputHero: document.getElementById("file-input-hero"),
+  projectNickname: document.getElementById("project-nickname"),
+  projectFileHint: document.getElementById("project-file-hint"),
   syncStatus: document.getElementById("sync-status"),
   buildStamp: document.getElementById("build-stamp"),
   loginBuild: document.getElementById("login-build"),
@@ -157,8 +159,10 @@ function syncActiveFromState() {
   active.categories = state.categories;
   active.rules = state.rules;
   active.groupNotes = state.groupNotes || {};
+  active.groupNicknames = state.groupNicknames || {};
   active.projectSource = state.projectSource || "";
   active.source = state.projectSource || active.source || "local";
+  active.fileName = state.fileName || active.fileName || "";
   active.name = state.projectName || active.name;
   active.updatedAt = new Date().toISOString();
 }
@@ -168,10 +172,33 @@ function applyProjectToState(project) {
   state.categories = project.categories?.length ? [...project.categories] : defaultCategories();
   state.rules = Array.isArray(project.rules) ? project.rules : [];
   state.groupNotes = project.groupNotes && typeof project.groupNotes === "object" ? { ...project.groupNotes } : {};
+  state.groupNicknames =
+    project.groupNicknames && typeof project.groupNicknames === "object" ? { ...project.groupNicknames } : {};
   state.projectSource = project.projectSource || project.source || "";
   state.projectId = project.id;
   state.projectName = project.name || "โปรเจกต์";
+  state.fileName = project.fileName || "";
   workspace.activeId = project.id;
+  paintProjectNickUi();
+}
+
+function fileStem(name) {
+  return String(name || "").replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "").trim() || "ไฟล์นำเข้า";
+}
+
+function paintProjectNickUi() {
+  if (els.projectNickname && document.activeElement !== els.projectNickname) {
+    els.projectNickname.value = state.projectName || "";
+  }
+  if (els.projectFileHint) {
+    els.projectFileHint.textContent = state.fileName ? `ไฟล์: ${state.fileName}` : "ไฟล์: —";
+  }
+}
+
+function displayGroupName(g) {
+  const nick = (state.groupNicknames?.[g.key] || "").trim();
+  if (nick) return nick;
+  return g.name;
 }
 
 function clearSessionUi() {
@@ -218,20 +245,26 @@ function createProjectFromRows({
   categories,
   rules = [],
   groupNotes = {},
+  groupNicknames = {},
+  fileName = "",
   activate = true,
 }) {
   syncActiveFromState();
+  const resolvedFile = fileName || "";
   const project = {
     id: makeProjectId(),
-    name: String(name || "โปรเจกต์ใหม่").slice(0, 80),
+    name: String(name || fileStem(resolvedFile) || "โปรเจกต์ใหม่").slice(0, 80),
     source: source || "import",
+    fileName: resolvedFile,
     updatedAt: new Date().toISOString(),
     ...emptyProjectFields({
       transactions: rows,
       categories: categories?.length ? categories : defaultCategories(),
       rules,
       groupNotes,
+      groupNicknames,
       projectSource: source || "import",
+      fileName: resolvedFile,
     }),
   };
   workspace.projects = workspace.projects.filter(
@@ -250,27 +283,19 @@ function createProjectFromRows({
   return project;
 }
 
-function isPeerlandSource(source) {
-  return String(source || "")
-    .toLowerCase()
-    .includes("peerland");
-}
-
 function sourceGroupKey(source) {
   const s = String(source || "").trim();
-  if (isPeerlandSource(s)) return "__peerland__";
   if (!s) return "__unknown__";
-  // Strip sheet suffix "file.xlsx · Sheet1" → file.xlsx for grouping
+  // Strip sheet suffix "file.xlsx · Sheet1" → file.xlsx for grouping by filename
   return s.split(" · ")[0].trim() || s;
 }
 
 function projectNameFromSourceKey(key) {
-  if (key === "__peerland__") return "Peerland 2024–2025";
   if (key === "__unknown__") return "ไฟล์นำเข้า (ไม่ทราบชื่อ)";
-  return String(key).replace(/\.[^.]+$/, "").slice(0, 70) || "ไฟล์นำเข้า";
+  return fileStem(key);
 }
 
-/** Split a project that mixed Peerland + other imports into separate projects. */
+/** Split a project that mixed multiple source files into separate projects by filename. */
 function splitProjectBySources(project) {
   const rows = Array.isArray(project.transactions) ? project.transactions : [];
   const groups = new Map();
@@ -281,23 +306,19 @@ function splitProjectBySources(project) {
   }
   if (groups.size <= 1) return [];
 
-  let keepKey = groups.has("__peerland__") ? "__peerland__" : null;
-  if (!keepKey) {
-    keepKey = [...groups.entries()].sort((a, b) => b[1].length - a[1].length)[0][0];
-  }
+  // Keep the largest file group in the current project; extract the rest.
+  const keepKey = [...groups.entries()].sort((a, b) => b[1].length - a[1].length)[0][0];
 
   const created = [];
   for (const [key, list] of groups) {
     if (key === keepKey) continue;
-    // Skip empty accidentals
     if (!list.length) continue;
-    // Avoid duplicate project if same-name import already exists with identical count+source
+    const fileName = key === "__unknown__" ? "" : key;
     const name = projectNameFromSourceKey(key);
     const exists = workspace.projects.some(
       (p) =>
         p.id !== project.id &&
-        p.source === "import" &&
-        p.name === name &&
+        (p.fileName === fileName || p.name === name) &&
         Array.isArray(p.transactions) &&
         p.transactions.length === list.length
     );
@@ -305,10 +326,12 @@ function splitProjectBySources(project) {
     const np = createProjectFromRows({
       name,
       source: "import",
+      fileName,
       rows: list.map((t) => ({ ...t })),
       categories: defaultCategories(),
       rules: [],
       groupNotes: {},
+      groupNicknames: {},
       activate: false,
     });
     created.push(np);
@@ -316,17 +339,37 @@ function splitProjectBySources(project) {
 
   const keepRows = groups.get(keepKey) || [];
   project.transactions = keepRows;
-  if (keepKey === "__peerland__") {
-    project.name = "Peerland 2024–2025";
-    project.source = "peerland";
-    project.projectSource = "peerland";
+  project.fileName = keepKey === "__unknown__" ? project.fileName || "" : keepKey;
+  if (!project.name || /peerland/i.test(project.name)) {
+    project.name = projectNameFromSourceKey(keepKey);
   }
+  project.source = "import";
+  project.projectSource = "import";
   project.updatedAt = new Date().toISOString();
   return created;
 }
 
+function normalizeLegacyProjectNames() {
+  let changed = false;
+  for (const p of workspace.projects) {
+    if (p.source === "peerland" || /^peerland/i.test(p.name || "") || /^Peerland/i.test(p.name || "")) {
+      if (!p.fileName) p.fileName = "peerland_2024-2025.json";
+      p.name = fileStem(p.fileName);
+      p.source = "import";
+      p.projectSource = "import";
+      changed = true;
+    }
+  }
+  if (changed) {
+    const active = workspace.projects.find((x) => x.id === workspace.activeId);
+    if (active) applyProjectToState(active);
+  }
+  return changed;
+}
+
 function recoverMergedImports({ silent = false } = {}) {
   syncActiveFromState();
+  normalizeLegacyProjectNames();
   const created = [];
   for (const project of [...workspace.projects]) {
     created.push(...splitProjectBySources(project));
@@ -361,9 +404,11 @@ function cloneStateSlice() {
       keywords: Array.isArray(r.keywords) ? [...r.keywords] : r.keywords,
     })),
     groupNotes: { ...(state.groupNotes || {}) },
+    groupNicknames: { ...(state.groupNicknames || {}) },
     projectSource: state.projectSource || "",
     projectName: state.projectName || "",
     projectId: state.projectId || "",
+    fileName: state.fileName || "",
   };
 }
 
@@ -375,9 +420,12 @@ function applyStateSlice(slice) {
     keywords: Array.isArray(r.keywords) ? [...r.keywords] : r.keywords,
   }));
   state.groupNotes = { ...(slice.groupNotes || {}) };
+  state.groupNicknames = { ...(slice.groupNicknames || {}) };
   state.projectSource = slice.projectSource || "";
   if (slice.projectName) state.projectName = slice.projectName;
   if (slice.projectId) state.projectId = slice.projectId;
+  if (slice.fileName != null) state.fileName = slice.fileName;
+  paintProjectNickUi();
 }
 
 function updateUndoButton() {
@@ -678,16 +726,22 @@ function renderGroupSummary() {
     .map((g) => {
       const isActive = active === g.key;
       const gNote = state.groupNotes?.[g.key] || "";
+      const nick = state.groupNicknames?.[g.key] || "";
       return `<tr class="${isActive ? "is-active" : ""}" data-group="${escapeHtml(g.key)}">
         <td>
           <div class="group-title-row">
-            <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}">${escapeHtml(g.name)}</button>
+            <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}" title="${escapeHtml(g.name)}">${escapeHtml(displayGroupName(g))}</button>
             ${
               g.key === "__uncat"
                 ? ""
-                : `<button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(g.key)}" title="แก้ชื่อกลุ่ม">แก้ชื่อ</button>`
+                : `<button type="button" class="btn quiet tiny" data-rename-group="${escapeHtml(g.key)}" title="เปลี่ยนชื่อกลุ่มในรายการ">เปลี่ยนชื่อ</button>`
             }
           </div>
+          ${
+            g.key === "__uncat"
+              ? ""
+              : `<input class="group-nick" data-group-nick="${escapeHtml(g.key)}" value="${escapeHtml(nick)}" placeholder="ชื่อเล่นกลุ่ม…" title="ชื่อเล่นสำหรับสรุป/พิมพ์" />`
+          }
         </td>
         <td class="num">${g.count.toLocaleString("th-TH")}</td>
         <td class="num amount-in">${escapeHtml(formatMoney(g.sumIn))}</td>
@@ -819,7 +873,7 @@ function printOverview() {
           .map((g) => {
             const gNote = state.groupNotes?.[g.key] || "";
             return `<tr>
-              <td>${escapeHtml(g.name)}</td>
+              <td>${escapeHtml(displayGroupName(g))}${g.name !== displayGroupName(g) ? ` <span style="color:#666">(${escapeHtml(g.name)})</span>` : ""}</td>
               <td class="num">${g.count.toLocaleString("th-TH")}</td>
               <td class="num">${escapeHtml(printMoney(g.sumIn))}</td>
               <td class="num">${escapeHtml(printMoney(g.sumOut))}</td>
@@ -902,6 +956,7 @@ function renderTable() {
   els.loginGate?.classList.add("is-hidden");
   els.authTools?.classList.remove("is-hidden");
   renderProjectSelect();
+  paintProjectNickUi();
 
   const hasData = state.transactions.length > 0;
   els.empty.classList.toggle("is-hidden", hasData);
@@ -1040,6 +1095,10 @@ function renameGroup(oldName, newName) {
       state.groupNotes[next] = state.groupNotes[prev];
       delete state.groupNotes[prev];
     }
+    if (Object.prototype.hasOwnProperty.call(state.groupNicknames || {}, prev)) {
+      state.groupNicknames[next] = state.groupNicknames[prev];
+      delete state.groupNicknames[prev];
+    }
     if (els.filterCategory.value === prev) els.filterCategory.value = next;
   });
   schedulePersist();
@@ -1081,62 +1140,51 @@ function beginRenameGroup(groupKey) {
 }
 
 function detectProjectSource() {
-  if (state.projectSource === "peerland" || state.projectSource === "demo" || state.projectSource === "import") {
-    return state.projectSource;
-  }
+  if (state.projectSource === "demo" || state.projectSource === "import") return state.projectSource;
   const params = new URLSearchParams(window.location.search);
-  if (params.get("peerland") === "1") return "peerland";
   if (params.get("demo") === "1") return "demo";
-  const peerlandHits = state.transactions.filter((t) =>
-    String(t.source || "").includes("peerland")
-  ).length;
-  if (peerlandHits > state.transactions.length / 2) return "peerland";
-  return state.projectSource || "";
+  if (state.fileName) return "import";
+  return state.projectSource || "import";
 }
 
 async function reloadProjectFresh() {
   if (!requireLogin()) return;
-  const source = detectProjectSource() || "peerland";
-  if (source === "import") {
+  const source = detectProjectSource();
+  const label = state.projectName || state.fileName || "โปรเจกต์นี้";
+  if (source === "demo") {
     const ok = window.confirm(
-      `ล้างแท็ก / Note / กฎ ของโปรเจกต์ “${state.projectName || "นี้"}”?\n\nไฟล์นำเข้าไม่มีต้นทางให้โหลดซ้ำ — จะเหลือรายการดิบในโปรเจกต์นี้เท่านั้น`
+      `เคลียร์แท็ก / Note / กฎ แล้วอ่านตัวอย่างสั้นใหม่ทั้งหมด?\n\nกดเลิกทำได้ถ้าเพิ่งกดพลาด`
     );
     if (!ok) return;
-    withUndo("เคลียร์แท็กโปรเจกต์นำเข้า", () => {
-      state.groupNotes = {};
-      state.rules = [];
-      for (const t of state.transactions) {
-        t.category = "";
-        t.note = "";
-      }
-    });
-    schedulePersist();
-    scheduleRender();
-    toast("เคลียร์แท็ก/Note แล้ว · กดเลิกทำได้");
+    const before = cloneStateSlice();
+    try {
+      await startDemo({ replace: true, fresh: true, recordUndo: false });
+      pushUndo(`เคลียร์อ่านใหม่ (${label})`, before);
+      toast(`อ่านตัวอย่างใหม่แล้ว · กดเลิกทำได้`);
+    } catch (err) {
+      applyStateSlice(before);
+      schedulePersist();
+      scheduleRender();
+      toast(err.message || "อ่านไฟล์ใหม่ไม่สำเร็จ");
+    }
     return;
   }
-  const label =
-    source === "demo"
-      ? "ตัวอย่างสั้น"
-      : source === "peerland"
-        ? "Peerland 2024–2025"
-        : "โปรเจกต์นี้";
   const ok = window.confirm(
-    `เคลียร์แท็ก / Note / กฎ แล้วอ่านไฟล์ “${label}” ใหม่ทั้งหมด?\n\nกดเลิกทำได้ถ้าเพิ่งกดพลาด`
+    `ล้างแท็ก / Note / กฎ / ชื่อเล่นกลุ่ม ของโปรเจกต์ “${label}”?\n\nไฟล์ต้นทางไม่มีในเครื่องแล้ว — จะเหลือรายการดิบในโปรเจกต์นี้`
   );
   if (!ok) return;
-  const before = cloneStateSlice();
-  try {
-    if (source === "demo") await startDemo({ replace: true, fresh: true, recordUndo: false });
-    else await startPeerland({ replace: true, fresh: true, recordUndo: false });
-    pushUndo(`เคลียร์อ่านใหม่ (${label})`, before);
-    toast(`อ่าน “${label}” ใหม่แล้ว · กดเลิกทำได้`);
-  } catch (err) {
-    applyStateSlice(before);
-    schedulePersist();
-    scheduleRender();
-    toast(err.message || "อ่านไฟล์ใหม่ไม่สำเร็จ");
-  }
+  withUndo("เคลียร์แท็กโปรเจกต์", () => {
+    state.groupNotes = {};
+    state.groupNicknames = {};
+    state.rules = [];
+    for (const t of state.transactions) {
+      t.category = "";
+      t.note = "";
+    }
+  });
+  schedulePersist();
+  scheduleRender();
+  toast("เคลียร์แท็ก/Note/ชื่อเล่นแล้ว · กดเลิกทำได้");
 }
 
 async function importFiles(fileList) {
@@ -1163,14 +1211,16 @@ async function importFiles(fileList) {
         toast(`${file.name}: ไม่พบรายการ`);
         continue;
       }
-      const baseName = String(file.name || "ไฟล์ใหม่").replace(/\.[^.]+$/, "").slice(0, 70);
+      const baseName = fileStem(file.name);
       const project = createProjectFromRows({
         name: baseName,
         source: "import",
+        fileName: file.name || baseName,
         rows,
         categories: defaultCategories(),
         rules: [],
         groupNotes: {},
+        groupNicknames: {},
         activate: false,
       });
       created.push(project);
@@ -1216,6 +1266,7 @@ async function startDemo({ replace = true, fresh = false, recordUndo = true } = 
       existing.categories = defaultCategories();
       existing.projectSource = "demo";
       existing.source = "demo";
+      existing.fileName = "sample-statement.csv";
       existing.name = "ตัวอย่างสั้น";
       existing.updatedAt = new Date().toISOString();
       applyProjectToState(existing);
@@ -1224,18 +1275,22 @@ async function startDemo({ replace = true, fresh = false, recordUndo = true } = 
       createProjectFromRows({
         name: "ตัวอย่างสั้น",
         source: "demo",
+        fileName: "sample-statement.csv",
         rows,
         categories: defaultCategories(),
         rules: [],
         groupNotes: {},
+        groupNicknames: {},
       });
     }
   } else {
     createProjectFromRows({
       name: "ตัวอย่างสั้น",
       source: "demo",
+      fileName: "sample-statement.csv",
       rows,
       categories: defaultCategories(),
+      groupNicknames: {},
     });
   }
   schedulePersist();
@@ -1243,67 +1298,8 @@ async function startDemo({ replace = true, fresh = false, recordUndo = true } = 
   renderTable();
   const params = new URLSearchParams(window.location.search);
   params.set("demo", "1");
-  params.delete("peerland");
-  window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
   toast(`โปรเจกต์ตัวอย่าง · ${rows.length.toLocaleString("th-TH")} รายการ`);
-}
-
-async function startPeerland({ replace = true, fresh = false, recordUndo = true } = {}) {
-  if (!requireLogin()) return;
-  toast("กำลังโหลด Peerland เป็นโปรเจกต์…");
-  const res = await fetch(new URL("data/peerland_2024-2025.json", window.location.href));
-  if (!res.ok) throw new Error(`โหลด Peerland ไม่สำเร็จ (${res.status})`);
-  const payload = await res.json();
-  const rawRows = Array.isArray(payload.transactions) ? payload.transactions : [];
-  if (!rawRows.length) throw new Error("ไม่พบรายการ Peerland");
-  await new Promise((r) => setTimeout(r, 0));
-
-  let rules = [];
-  for (const rule of PEERLAND_RULES) {
-    rules = upsertRule(rules, rule);
-  }
-  let rows = rawRows.map((t) => ({
-    ...t,
-    category: fresh ? "" : t.category || "",
-    note: fresh ? "" : t.note || "",
-    source: t.source || "peerland_2024-2025_full.pdf",
-  }));
-  const applied = applyRules(rows, rules);
-  rows = applied.transactions;
-  rules = applied.rules;
-
-  const existing = workspace.projects.find((p) => p.projectSource === "peerland" || p.source === "peerland");
-  if (existing && replace) {
-    syncActiveFromState();
-    existing.transactions = rows;
-    existing.rules = rules;
-    existing.categories = [...PEERLAND_CATEGORIES];
-    existing.groupNotes = fresh ? {} : existing.groupNotes || {};
-    existing.projectSource = "peerland";
-    existing.source = "peerland";
-    existing.name = "Peerland 2024–2025";
-    existing.updatedAt = new Date().toISOString();
-    applyProjectToState(existing);
-    clearSessionUi();
-  } else {
-    createProjectFromRows({
-      name: "Peerland 2024–2025",
-      source: "peerland",
-      rows,
-      categories: [...PEERLAND_CATEGORIES],
-      rules,
-      groupNotes: {},
-    });
-  }
-
-  schedulePersist();
-  renderProjectSelect();
-  renderTable();
-  const params = new URLSearchParams(window.location.search);
-  params.set("peerland", "1");
-  params.delete("demo");
-  window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-  toast(`โปรเจกต์ Peerland · ${rows.length.toLocaleString("th-TH")} รายการ`);
 }
 
 function updateAuthButton() {
@@ -1323,13 +1319,6 @@ function updateAuthButton() {
 
 async function runPendingLoads() {
   if (!isLoggedIn()) return;
-  if (pendingPeerland || new URLSearchParams(location.search).get("peerland") === "1") {
-    pendingPeerland = false;
-    if (!state.transactions.length) {
-      await startPeerland({ replace: true }).catch((err) => toast(err.message));
-      return;
-    }
-  }
   if (pendingDemo || new URLSearchParams(location.search).get("demo") === "1") {
     pendingDemo = false;
     if (!state.transactions.length) {
@@ -1370,8 +1359,9 @@ async function setupAuth() {
           if (!target) {
             target = {
               id: targetId || makeProjectId(),
-              name: remote.projectName || (remote.projectSource === "peerland" ? "Peerland 2024–2025" : "โปรเจกต์คลาวด์"),
+              name: remote.projectName || remote.fileName || "โปรเจกต์คลาวด์",
               source: remote.projectSource || "cloud",
+              fileName: remote.fileName || "",
               updatedAt: new Date().toISOString(),
               ...emptyProjectFields(),
             };
@@ -1383,8 +1373,10 @@ async function setupAuth() {
             if (remote.categories?.length) target.categories = remote.categories;
             if (remote.rules?.length) target.rules = remote.rules;
             if (remote.groupNotes) target.groupNotes = remote.groupNotes;
+            if (remote.groupNicknames) target.groupNicknames = remote.groupNicknames;
             if (remote.projectSource) target.projectSource = remote.projectSource;
             if (remote.projectName) target.name = remote.projectName;
+            if (remote.fileName) target.fileName = remote.fileName;
             target.updatedAt = new Date().toISOString();
             applyProjectToState(target);
             saveState(state, workspace);
@@ -1576,9 +1568,20 @@ function wireEvents() {
   els.groupList?.addEventListener("focusin", (e) => {
     const note = e.target.closest("[data-group-note]");
     if (note) rememberField(note);
+    const nick = e.target.closest("[data-group-nick]");
+    if (nick) rememberField(nick);
   });
 
   els.groupList?.addEventListener("input", (e) => {
+    const nick = e.target.closest("[data-group-nick]");
+    if (nick) {
+      const key = nick.getAttribute("data-group-nick");
+      const next = nick.value.trim();
+      if (next) state.groupNicknames[key] = next;
+      else delete state.groupNicknames[key];
+      schedulePersist();
+      return;
+    }
     const note = e.target.closest("[data-group-note]");
     if (!note) return;
     const key = note.getAttribute("data-group-note");
@@ -1587,6 +1590,23 @@ function wireEvents() {
   });
 
   els.groupList?.addEventListener("change", (e) => {
+    const nick = e.target.closest("[data-group-nick]");
+    if (nick) {
+      const key = nick.getAttribute("data-group-nick");
+      const beforeVal = fieldBefore.get(nick);
+      fieldBefore.delete(nick);
+      const next = nick.value.trim();
+      if (beforeVal !== undefined && beforeVal !== next) {
+        const before = cloneStateSlice();
+        before.groupNicknames[key] = beforeVal;
+        pushUndo("ตั้งชื่อเล่นกลุ่ม", before);
+      }
+      if (next) state.groupNicknames[key] = next;
+      else delete state.groupNicknames[key];
+      schedulePersist();
+      scheduleRender();
+      return;
+    }
     const note = e.target.closest("[data-group-note]");
     if (!note) return;
     const key = note.getAttribute("data-group-note");
@@ -1669,9 +1689,26 @@ function wireEvents() {
 
   els.btnAuth?.addEventListener("click", handleAuthClick);
   els.btnAuthHero?.addEventListener("click", handleAuthClick);
-  els.btnPeerland?.addEventListener("click", () => startPeerland({ replace: true }).catch((err) => toast(err.message)));
-  els.btnPeerlandHero?.addEventListener("click", () => startPeerland({ replace: true }).catch((err) => toast(err.message)));
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }).catch((err) => toast(err.message)));
+  els.fileInputHero?.addEventListener("change", (e) => {
+    importFiles(e.target.files).catch((err) => toast(err.message || "นำเข้าไม่สำเร็จ"));
+    e.target.value = "";
+  });
+
+  els.projectNickname?.addEventListener("change", () => {
+    const name = (els.projectNickname.value || "").trim();
+    if (!name) return;
+    state.projectName = name.slice(0, 80);
+    schedulePersist();
+    renderProjectSelect();
+    toast(`ตั้งชื่อโปรเจกต์เป็น “${name}”`);
+  });
+  els.projectNickname?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      els.projectNickname.blur();
+    }
+  });
 }
 
 wireEvents();
@@ -1682,6 +1719,5 @@ setupAuth();
 
 {
   const params = new URLSearchParams(window.location.search);
-  if (params.get("peerland") === "1" || location.hash === "#peerland") pendingPeerland = true;
-  else if (params.get("demo") === "1" || location.hash === "#demo") pendingDemo = true;
+  if (params.get("demo") === "1" || location.hash === "#demo") pendingDemo = true;
 }

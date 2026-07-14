@@ -25,7 +25,9 @@ export function emptyProjectFields(overrides = {}) {
     categories: [...DEFAULT_CATEGORIES],
     rules: [],
     groupNotes: {},
+    groupNicknames: {},
     projectSource: "",
+    fileName: "",
     ...overrides,
   };
 }
@@ -43,12 +45,16 @@ function normalizeProject(raw, fallbackName = "โปรเจกต์") {
         : [...DEFAULT_CATEGORIES],
     rules: Array.isArray(raw?.rules) ? raw.rules : [],
     groupNotes: raw?.groupNotes && typeof raw.groupNotes === "object" ? raw.groupNotes : {},
+    groupNicknames:
+      raw?.groupNicknames && typeof raw.groupNicknames === "object" ? raw.groupNicknames : {},
     projectSource: typeof raw?.projectSource === "string" ? raw.projectSource : "",
+    fileName: typeof raw?.fileName === "string" ? raw.fileName : "",
   });
   return {
     id: typeof raw?.id === "string" && raw.id ? raw.id : makeProjectId(),
     name: String(raw?.name || fallbackName).trim() || fallbackName,
     source: typeof raw?.source === "string" ? raw.source : fields.projectSource || "local",
+    fileName: fields.fileName || "",
     updatedAt: raw?.updatedAt || new Date().toISOString(),
     ...fields,
   };
@@ -64,8 +70,9 @@ function migrateLegacyState() {
       {
         ...data,
         id: "legacy-main",
-        name: data.projectSource === "peerland" ? "Peerland 2024–2025" : data.projectSource === "demo" ? "ตัวอย่างสั้น" : "โปรเจกต์เดิม",
+        name: data.projectSource === "demo" ? "ตัวอย่างสั้น" : data.fileName || data.projectName || "โปรเจกต์เดิม",
         source: data.projectSource || "legacy",
+        fileName: data.fileName || "",
       },
       "โปรเจกต์เดิม"
     );
@@ -134,9 +141,11 @@ export function saveWorkspace(workspace) {
         categories: active.categories,
         rules: active.rules,
         groupNotes: active.groupNotes || {},
+        groupNicknames: active.groupNicknames || {},
         projectSource: active.projectSource || "",
         projectId: active.id,
         projectName: active.name,
+        fileName: active.fileName || "",
         savedAt: new Date().toISOString(),
       })
     );
@@ -151,9 +160,11 @@ export function loadState() {
     categories: active?.categories?.length ? active.categories : [...DEFAULT_CATEGORIES],
     rules: active?.rules || [],
     groupNotes: active?.groupNotes || {},
+    groupNicknames: active?.groupNicknames || {},
     projectSource: active?.projectSource || "",
     projectId: active?.id || "",
     projectName: active?.name || "โปรเจกต์",
+    fileName: active?.fileName || "",
   };
 }
 
@@ -165,8 +176,10 @@ export function saveState(state, workspace) {
       active.categories = state.categories || [...DEFAULT_CATEGORIES];
       active.rules = state.rules || [];
       active.groupNotes = state.groupNotes || {};
+      active.groupNicknames = state.groupNicknames || {};
       active.projectSource = state.projectSource || "";
       active.source = state.projectSource || active.source || "local";
+      active.fileName = state.fileName || active.fileName || "";
       if (state.projectName) active.name = state.projectName;
       active.updatedAt = new Date().toISOString();
     }
@@ -180,7 +193,9 @@ export function saveState(state, workspace) {
       categories: state.categories,
       rules: state.rules,
       groupNotes: state.groupNotes || {},
+      groupNicknames: state.groupNicknames || {},
       projectSource: state.projectSource || "",
+      fileName: state.fileName || "",
       savedAt: new Date().toISOString(),
     })
   );

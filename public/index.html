@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="TaxTag — จัดหมวดรายการโอน Peerland / statement ส่วนตัว" />
+  <meta name="description" content="TaxTag — จัดหมวดรายการ statement เป็นกลุ่ม พร้อมสรุปยอด" />
   <meta name="theme-color" content="#f7f6f2" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>TaxTag</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=28" />
+  <link rel="stylesheet" href="css/app.css?v=29" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -30,7 +30,6 @@
         <button type="button" class="btn quiet" id="btn-undo" disabled title="เลิกทำ (Ctrl+Z)">เลิกทำ</button>
         <button type="button" class="btn quiet" id="btn-split-merged" title="แยกไฟล์ที่ถูกรวมผิดพลาดออกเป็นโปรเจกต์ใหม่">แยกไฟล์ที่รวม</button>
         <button type="button" class="btn quiet" id="btn-reload-project" title="ล้างแท็ก/Note แล้วอ่านไฟล์โปรเจกต์ใหม่ทั้งหมด">เคลียร์อ่านใหม่</button>
-        <button type="button" class="btn quiet" id="btn-peerland">Peerland</button>
         <label class="btn quiet file-btn" for="file-input">
           นำเข้าโปรเจกต์ใหม่
           <input id="file-input" type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple hidden />
@@ -53,9 +52,12 @@
 
     <section class="hero is-hidden" id="empty-state">
       <h1>TaxTag</h1>
-      <p>จำแนกรายการเป็นกลุ่ม พร้อมสรุปยอดแยก — พิมพ์ Note ได้เลย ไม่ต้องกดบันทึก</p>
+      <p>จำแนกรายการเป็นกลุ่ม พร้อมสรุปยอดแยก — นำเข้าไฟล์แล้วตั้งชื่อโปรเจกต์/กลุ่มเองได้</p>
       <div class="hero-actions">
-        <button type="button" class="btn solid" id="btn-peerland-hero">เปิด Peerland 2024–2025</button>
+        <label class="btn solid file-btn" for="file-input-hero">
+          นำเข้าไฟล์สร้างโปรเจกต์
+          <input id="file-input-hero" type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple hidden />
+        </label>
         <button type="button" class="btn quiet" id="btn-demo">ตัวอย่างสั้น</button>
       </div>
       <p class="build-stamp hero-build" id="empty-build">v—</p>
@@ -96,6 +98,11 @@
         <div class="group-summary-head">
           <div class="group-summary-title">
             <h2>สรุปตามกลุ่ม</h2>
+            <div class="project-nick-row">
+              <label for="project-nickname">ชื่อเล่นโปรเจกต์</label>
+              <input id="project-nickname" type="text" maxlength="80" placeholder="ตั้งชื่อให้จำได้ว่าคือไฟล์ไหน…" />
+              <span class="file-hint" id="project-file-hint">ไฟล์: —</span>
+            </div>
             <div class="period-bar" id="period-bar" aria-label="เลือกช่วงเวลา">
               <span class="period-label">ช่วง</span>
               <div class="period-chips" id="period-chips"></div>
@@ -148,6 +155,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
-  <script type="module" src="js/app.js?v=28"></script>
+  <script type="module" src="js/app.js?v=29"></script>
 </body>
 </html>
