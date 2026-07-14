@@ -3,8 +3,10 @@ import {
   GoogleAuthProvider,
   indexedDBLocalPersistence,
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   initializeAuth,
   getAuth,
+  setPersistence,
   onAuthStateChanged,
   signInWithPopup,
   signInWithRedirect,
@@ -35,33 +37,66 @@ export let auth = null;
 export let db = null;
 
 function isMobile() {
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia("(max-width: 768px)").matches;
+  return (
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+    window.matchMedia("(max-width: 768px)").matches
+  );
+}
+
+/** Drop blank fields that Firebase SDK rejects (e.g. databaseURL: ""). */
+function sanitizeConfig(raw) {
+  const out = {};
+  for (const [key, value] of Object.entries(raw || {})) {
+    if (value == null) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 export async function initFirebase() {
-  if (app) return { auth, db };
+  if (app && auth && db) return { auth, db };
+
   let config = { ...PROJECT_DEFAULTS };
   try {
     const res = await fetch("/__/firebase/init.json");
-    if (res.ok) config = { ...config, ...(await res.json()) };
+    if (res.ok) config = { ...config, ...sanitizeConfig(await res.json()) };
   } catch {
     /* non-Firebase hosting */
   }
+  config = sanitizeConfig(config);
   // Keep authDomain on *.firebaseapp.com so Google OAuth redirect stays valid.
   config.authDomain = PROJECT_DEFAULTS.authDomain;
+
   app = initializeApp(config);
+
+  // Prefer getAuth (includes popup resolver). initializeAuth without resolver
+  // causes auth/argument-error on signInWithPopup.
   try {
     auth = initializeAuth(app, {
       persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
     });
-  } catch {
-    auth = getAuth(app);
-  }
-  db = getFirestore(app);
-  try {
-    await getRedirectResult(auth);
   } catch (err) {
-    console.warn("redirect result", err);
+    console.warn("initializeAuth fallback", err?.code || err);
+    auth = getAuth(app);
+    try {
+      await setPersistence(auth, indexedDBLocalPersistence);
+    } catch {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch {
+        /* keep default */
+      }
+    }
+  }
+
+  db = getFirestore(app);
+
+  try {
+    await getRedirectResult(auth, browserPopupRedirectResolver);
+  } catch (err) {
+    console.warn("redirect result", err?.code || err);
   }
   return { auth, db };
 }
@@ -72,33 +107,43 @@ export function watchAuth(callback) {
 }
 
 export async function loginWithGoogle() {
+  if (!auth) await initFirebase();
   if (!auth) throw new Error("Firebase ยังไม่พร้อม");
+
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account", login_hint: ALLOWED_EMAIL });
+  provider.addScope("email");
+  provider.addScope("profile");
+
   let result;
   try {
     if (isMobile()) {
-      await signInWithRedirect(auth, provider);
-      return null; // page will reload
-    }
-    result = await signInWithPopup(auth, provider);
-  } catch (err) {
-    if (err?.code === "auth/popup-blocked" || err?.code === "auth/popup-closed-by-user") {
-      await signInWithRedirect(auth, provider);
+      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
       return null;
     }
-    // Retry once without custom params if the provider args are rejected.
-    if (err?.code === "auth/argument-error") {
-      const plain = new GoogleAuthProvider();
-      if (isMobile()) {
-        await signInWithRedirect(auth, plain);
+    result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+  } catch (err) {
+    const code = err?.code || "";
+    if (
+      code === "auth/popup-blocked" ||
+      code === "auth/popup-closed-by-user" ||
+      code === "auth/cancelled-popup-request"
+    ) {
+      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+      return null;
+    }
+    if (code === "auth/argument-error") {
+      // Retry the simplest supported path.
+      try {
+        result = await signInWithPopup(auth, new GoogleAuthProvider());
+      } catch (err2) {
+        await signInWithRedirect(auth, new GoogleAuthProvider());
         return null;
       }
-      result = await signInWithPopup(auth, plain);
     } else {
       throw err;
     }
   }
+
   const email = (result.user?.email || "").toLowerCase();
   if (email !== ALLOWED_EMAIL.toLowerCase()) {
     await signOut(auth);
