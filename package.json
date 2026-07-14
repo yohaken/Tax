@@ -1,0 +1,14 @@
+{
+  "name": "taxtag",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Personal bank statement categorizer — import PDF/Excel, smart search, tag transfers",
+  "scripts": {
+    "start": "npx --yes serve public -p 4173",
+    "deploy": "npx --yes firebase-tools deploy --only hosting"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
