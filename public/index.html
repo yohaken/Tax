@@ -3,167 +3,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="TaxTag — นำเข้า statement PDF/Excel ค้นหารายการโอนอย่างฉลาด และติดป้ายว่าแต่ละรายการเกี่ยวกับอะไร" />
-  <meta name="theme-color" content="#0b3d2e" />
-  <title>TaxTag — จัดหมวดรายการโอน</title>
+  <meta name="description" content="TaxTag — จัดหมวดรายการโอน Peerland / statement ส่วนตัว" />
+  <meta name="theme-color" content="#f7f6f2" />
+  <title>TaxTag</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/app.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b3d2e'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' fill='%23d8f3dc'%3ET%3C/text%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
-  <div class="atmosphere" aria-hidden="true"></div>
-
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">₸</span>
-      <div>
-        <p class="brand-name">TaxTag</p>
-        <p class="brand-sub">จัดหมวดรายการโอนส่วนตัว</p>
-      </div>
+      <span class="brand-name">TaxTag</span>
+      <span class="brand-sub" id="sync-status">พร้อมใช้งาน</span>
     </div>
     <div class="top-actions">
-      <button type="button" class="btn ghost" id="btn-export" title="ส่งออก Excel">ส่งออก</button>
-      <button type="button" class="btn ghost" id="btn-clear" title="ล้างข้อมูลในเครื่อง">ล้างข้อมูล</button>
-      <label class="btn primary file-btn" for="file-input">
-        นำเข้าไฟล์
+      <button type="button" class="btn quiet" id="btn-auth">เข้าสู่ระบบ Google</button>
+      <button type="button" class="btn quiet" id="btn-peerland">Peerland</button>
+      <label class="btn quiet file-btn" for="file-input">
+        นำเข้า
         <input id="file-input" type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple hidden />
       </label>
+      <button type="button" class="btn solid" id="btn-export">Export XLSX</button>
     </div>
   </header>
 
-  <main class="layout">
-    <div id="test-banner" class="banner-test is-hidden" role="status">
-      โหมดทดสอบ — โหลดข้อมูลตัวอย่างแล้ว ลองค้นหาหรือกดติดป้ายได้เลย
-    </div>
-    <section class="intro" id="empty-state">
-      <h1>ใส่ป้ายให้ทุกบรรทัดใน statement</h1>
-      <p>
-        นำเข้า PDF หรือ Excel จากธนาคาร แล้วค้นหารายการโอนด้วยคำสำคัญ ยอดเงิน หรือช่วงวันที่
-        เพื่อกำหนดว่าแต่ละรายการเกี่ยวกับอะไร — ข้อมูลเก็บในเครื่องของคุณเท่านั้น
-      </p>
-      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="วางไฟล์ statement ที่นี่">
-        <strong>ลากไฟล์มาวางที่นี่</strong>
-        <span>รองรับ PDF · Excel (.xlsx/.xls) · CSV</span>
+  <main class="shell">
+    <section class="hero" id="empty-state">
+      <h1>TaxTag</h1>
+      <p>จัดหมวดรายการโอนแบบเรียบง่าย — พิมพ์คอมเมนต์ได้เลย ไม่ต้องกดบันทึก</p>
+      <div class="hero-actions">
+        <button type="button" class="btn solid" id="btn-peerland-hero">เปิด Peerland 2024–2025</button>
+        <button type="button" class="btn quiet" id="btn-demo">ตัวอย่างสั้น</button>
       </div>
-      <div class="cta-row">
-        <button type="button" class="btn primary" id="btn-peerland">เปิด Peerland 2024–2025</button>
-        <button type="button" class="btn ghost" id="btn-demo">ตัวอย่างสั้น</button>
-        <a class="btn ghost" href="peerland_2024-2025_full.pdf" download>ดาวน์โหลด PDF</a>
-      </div>
-      <p class="sample-link">มี statement กสิกร Peerland 2,378 รายการ พร้อมแล้ว — กดปุ่มด้านบน หรือเปิดด้วย <code>?peerland=1</code></p>
+      <p class="fine">ล็อกอินด้วย <strong>yohaken@gmail.com</strong> ครั้งเดียว ซิงค์หมวด/คอมเมนต์ข้ามเครื่อง</p>
     </section>
 
-    <section class="workspace is-hidden" id="workspace" aria-live="polite">
-      <aside class="sidebar">
-        <div class="panel">
-          <h2>ค้นหาอย่างฉลาด</h2>
-          <label class="field">
-            <span>ค้นหา</span>
-            <input id="search-input" type="search" placeholder="ชื่อร้าน, เลขบัญชี, ยอดเงิน, คำว่าค่าเช่า…" autocomplete="off" />
-          </label>
-          <div class="field-row">
-            <label class="field">
-              <span>จากวันที่</span>
-              <input id="date-from" type="date" />
-            </label>
-            <label class="field">
-              <span>ถึงวันที่</span>
-              <input id="date-to" type="date" />
-            </label>
-          </div>
-          <label class="field">
-            <span>ประเภท</span>
-            <select id="filter-category">
-              <option value="">ทั้งหมด</option>
-              <option value="__uncat">ยังไม่ติดป้าย</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>ทิศทางเงิน</span>
-            <select id="filter-direction">
-              <option value="">ทั้งหมด</option>
-              <option value="in">เงินเข้า</option>
-              <option value="out">เงินออก</option>
-            </select>
-          </label>
-          <div class="stat-grid" id="stat-grid">
-            <div class="stat"><span>รายการ</span><strong id="stat-count">0</strong></div>
-            <div class="stat"><span>ยังไม่ติดป้าย</span><strong id="stat-uncat">0</strong></div>
-            <div class="stat"><span>เงินเข้า</span><strong id="stat-in">฿0</strong></div>
-            <div class="stat"><span>เงินออก</span><strong id="stat-out">฿0</strong></div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <h2>หมวดหมู่ & กฎอัตโนมัติ</h2>
-          <p class="hint">เมื่อติดป้ายแล้ว ระบบจำคำสำคัญในรายละเอียด เพื่อแนะนำรายการคล้ายกัน</p>
-          <form id="category-form" class="category-form">
-            <input id="new-category" type="text" placeholder="ชื่อหมวด เช่น ค่าอาหาร / ลูกค้า A" maxlength="40" required />
-            <button type="submit" class="btn primary compact">เพิ่ม</button>
-          </form>
-          <ul class="category-list" id="category-list"></ul>
-        </div>
-
-        <div class="panel rules-panel">
-          <h2>กฎที่เรียนรู้แล้ว</h2>
-          <ul class="rule-list" id="rule-list"></ul>
-        </div>
-      </aside>
-
-      <div class="table-wrap">
-        <div class="table-toolbar">
-          <p id="result-label">แสดง 0 รายการ</p>
-          <div class="toolbar-actions">
-            <button type="button" class="btn ghost compact" id="btn-apply-rules">ใช้กฎอัตโนมัติทั้งหมด</button>
-            <button type="button" class="btn ghost compact" id="btn-bulk-tag" disabled>ติดป้ายที่เลือก</button>
-          </div>
-        </div>
-        <div class="table-scroll">
-          <table class="tx-table" id="tx-table">
-            <thead>
-              <tr>
-                <th class="col-check"><input type="checkbox" id="check-all" aria-label="เลือกทั้งหมด" /></th>
-                <th>วันที่</th>
-                <th>รายละเอียด</th>
-                <th class="num">เข้า</th>
-                <th class="num">ออก</th>
-                <th>หมวด</th>
-                <th>หมายเหตุ</th>
-              </tr>
-            </thead>
-            <tbody id="tx-body"></tbody>
-          </table>
-        </div>
+    <section class="workspace is-hidden" id="workspace">
+      <div class="filters">
+        <input id="search-input" type="search" placeholder="ค้นหาชื่อ · ยอดเงิน · หมวด…" autocomplete="off" />
+        <select id="filter-category" aria-label="หมวด">
+          <option value="">ทุกหมวด</option>
+          <option value="__uncat">ยังไม่มีหมวด</option>
+        </select>
+        <select id="filter-direction" aria-label="ทิศทาง">
+          <option value="">เข้า/ออก</option>
+          <option value="in">เงินเข้า</option>
+          <option value="out">เงินออก</option>
+        </select>
+        <input id="date-from" type="date" aria-label="จากวันที่" />
+        <input id="date-to" type="date" aria-label="ถึงวันที่" />
       </div>
+
+      <div class="stats" id="stat-grid">
+        <span><em id="stat-count">0</em> รายการ</span>
+        <span>ยังไม่ติดป้าย <em id="stat-uncat">0</em></span>
+        <span class="in">เข้า <em id="stat-in">฿0</em></span>
+        <span class="out">ออก <em id="stat-out">฿0</em></span>
+      </div>
+
+      <div class="table-scroll">
+        <table class="tx-table" id="tx-table">
+          <thead>
+            <tr>
+              <th>วันที่</th>
+              <th>รายละเอียด</th>
+              <th class="num">เข้า</th>
+              <th class="num">ออก</th>
+              <th>หมวด</th>
+              <th>คอมเมนต์</th>
+            </tr>
+          </thead>
+          <tbody id="tx-body"></tbody>
+        </table>
+      </div>
+      <p class="result-label" id="result-label">แสดง 0 รายการ</p>
     </section>
   </main>
 
-  <dialog id="tag-dialog" class="dialog">
-    <form method="dialog" id="tag-form">
-      <h2>ติดป้ายรายการ</h2>
-      <p class="dialog-preview" id="tag-preview"></p>
-      <label class="field">
-        <span>หมวดหมู่</span>
-        <input id="tag-category" list="category-datalist" placeholder="เลือกหรือพิมพ์หมวดใหม่" required />
-        <datalist id="category-datalist"></datalist>
-      </label>
-      <label class="field">
-        <span>หมายเหตุ (ถ้ามี)</span>
-        <input id="tag-note" type="text" placeholder="เช่น ค่าเช่า มี.ค. / โปรเจกต์ X" />
-      </label>
-      <label class="check-line">
-        <input type="checkbox" id="tag-learn" checked />
-        <span>จำคำสำคัญจากรายละเอียดนี้ แล้วแนะนำรายการคล้ายกัน</span>
-      </label>
-      <div class="dialog-actions">
-        <button type="button" class="btn ghost" id="tag-cancel" value="cancel">ยกเลิก</button>
-        <button type="submit" class="btn primary" value="ok">บันทึก</button>
-      </div>
-    </form>
-  </dialog>
-
+  <datalist id="category-datalist"></datalist>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>

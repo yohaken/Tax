@@ -1,30 +1,25 @@
-# TaxTag + Peerland 2024–2025
+# TaxTag
 
-เว็บจัดหมวดรายการโอนจาก statement + ชุดข้อมูล **Peerland กสิกร 2024–2025** (2,378 รายการ)
+จัดหมวดรายการโอนแบบ minimal — พิมพ์หมวด/คอมเมนต์แล้ว**เซฟเอง** ไม่ต้องกดบันทึก  
+ล็อกอิน Google ด้วย **yohaken@gmail.com** ครั้งเดียว (จำในเครื่องยาวๆ) + ซิงค์ Firebase
 
-## ลิงก์ถาวร (ไฟล์)
+## ปุ่มหลัก
+- **เข้าสู่ระบบ Google** — เฉพาะ `yohaken@gmail.com`
+- **Peerland** — โหลด statement 2024–2025 (2,378 รายการ)
+- **Export XLSX** — ส่งออกแถวที่กรองอยู่
 
-| รายการ | URL |
-|--------|-----|
-| PDF ต้นฉบับ | https://raw.githubusercontent.com/yohaken/Tax/gh-pages/peerland_2024-2025_full.pdf |
-| PDF (CDN) | https://cdn.jsdelivr.net/gh/yohaken/Tax@gh-pages/peerland_2024-2025_full.pdf |
-| CSV พร้อมใช้ | https://raw.githubusercontent.com/yohaken/Tax/gh-pages/data/peerland_2024-2025.csv |
-| JSON สำหรับแอป | https://raw.githubusercontent.com/yohaken/Tax/gh-pages/data/peerland_2024-2025.json |
+## ลิงก์
+- แอปทดสอบ: ดู tunnel / GitHub Pages `?peerland=1`
+- PDF: https://raw.githubusercontent.com/yohaken/Tax/gh-pages/peerland_2024-2025_full.pdf
 
-## ลิงก์แอป
-
-หลังเปิด GitHub Pages: https://yohaken.github.io/Tax/?peerland=1  
-
-ตั้งค่าครั้งเดียว: https://github.com/yohaken/Tax/settings/pages → branch `gh-pages` → `/`
-
-## ความเป็นส่วนตัว
-
-Repo นี้เป็น **สาธารณะ** — ใครก็เปิด PDF/CSV ได้  
-แนะนำ: ตั้ง repo เป็น **Private** ที่ https://github.com/yohaken/Tax/settings
-
-## ใช้งาน
-
+## Deploy Firebase (โปรเจกต์ mypeer-501909)
 ```bash
-npm start
-# เปิด http://localhost:4173/?peerland=1
+npx firebase-tools login
+npx firebase-tools use mypeer-501909
+npx firebase-tools deploy --only firestore:rules,hosting
 ```
+
+ใน Firebase Console:
+1. Authentication → Sign-in method → เปิด Google
+2. Authentication → Settings → Authorized domains ใส่โดเมนที่โฮสต์แอป
+3. Firestore → สร้าง database (ถ้ายังไม่มี) แล้ว deploy rules ตาม `firestore.rules`
