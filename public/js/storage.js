@@ -384,6 +384,61 @@ export function applyRules(transactions, rules) {
   return { transactions: nextTx, rules: nextRules, applied };
 }
 
+/** Parse amount field; empty / invalid → null (no bound). */
+export function parseAmountBound(raw) {
+  const v = String(raw ?? "")
+    .trim()
+    .replace(/,/g, "");
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function amountInRange(val, min, max) {
+  let lo = min;
+  let hi = max;
+  if (lo != null && hi != null && lo > hi) {
+    const tmp = lo;
+    lo = hi;
+    hi = tmp;
+  }
+  if (lo != null && val < lo) return false;
+  if (hi != null && val > hi) return false;
+  return true;
+}
+
+/**
+ * Table-layer amount filters.
+ * - เข้า / ออก: when set, match that direction + amount range
+ * - If both เข้า and ออก set: OR
+ * - มูลค่า: applies to any row amount (AND with above)
+ */
+export function filterByAmountRanges(list, ranges = {}) {
+  const inMin = ranges.inMin ?? null;
+  const inMax = ranges.inMax ?? null;
+  const outMin = ranges.outMin ?? null;
+  const outMax = ranges.outMax ?? null;
+  const valMin = ranges.valMin ?? null;
+  const valMax = ranges.valMax ?? null;
+  const hasIn = inMin != null || inMax != null;
+  const hasOut = outMin != null || outMax != null;
+  const hasVal = valMin != null || valMax != null;
+  if (!hasIn && !hasOut && !hasVal) return list;
+
+  return list.filter((t) => {
+    const amt = Number(t.amount) || 0;
+    if (hasVal && !amountInRange(amt, valMin, valMax)) return false;
+    if (hasIn && hasOut) {
+      const okIn = t.direction === "in" && amountInRange(amt, inMin, inMax);
+      const okOut = t.direction === "out" && amountInRange(amt, outMin, outMax);
+      return okIn || okOut;
+    }
+    if (hasIn) return t.direction === "in" && amountInRange(amt, inMin, inMax);
+    if (hasOut) return t.direction === "out" && amountInRange(amt, outMin, outMax);
+    return true;
+  });
+}
+
 export function smartSearch(transactions, query) {
   const q = String(query || "").trim();
   if (!q) return transactions.map((t, i) => ({ item: t, score: 1, refIndex: i }));

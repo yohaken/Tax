@@ -12,6 +12,8 @@ import {
   previewApplyRules,
   isReservedCategoryName,
   smartSearch,
+  filterByAmountRanges,
+  parseAmountBound,
   formatMoney,
   formatDateTh,
   exportWorkbook,
@@ -56,6 +58,8 @@ const selectedIds = new Set();
 const selectedGroupKeys = new Set();
 /** Existing group key chosen as merge destination (click row / “รวมเข้าที่นี่”). */
 let mergeTargetKey = "";
+/** @type {{ mode: "on" | "off", active: boolean, touched: Set<string> } | null} */
+let rowDrag = null;
 let tableSort = { key: "date", dir: "desc" };
 let groupSort = { key: "abs", dir: "desc" };
 let periodMode = "all"; // all | year:YYYY | custom
@@ -75,6 +79,13 @@ const els = {
   tableSearch: document.getElementById("table-search-input"),
   btnClearTableSearch: document.getElementById("btn-clear-table-search"),
   tableSearchHint: document.getElementById("table-search-hint"),
+  amtInMin: document.getElementById("amt-in-min"),
+  amtInMax: document.getElementById("amt-in-max"),
+  amtOutMin: document.getElementById("amt-out-min"),
+  amtOutMax: document.getElementById("amt-out-max"),
+  amtValMin: document.getElementById("amt-val-min"),
+  amtValMax: document.getElementById("amt-val-max"),
+  btnClearAmountFilters: document.getElementById("btn-clear-amount-filters"),
   dateFrom: document.getElementById("date-from"),
   dateTo: document.getElementById("date-to"),
   filterCategory: document.getElementById("filter-category"),
@@ -225,6 +236,7 @@ function clearSessionUi() {
   if (els.dateTo) els.dateTo.value = "";
   if (els.search) els.search.value = "";
   if (els.tableSearch) els.tableSearch.value = "";
+  clearAmountFilterInputs();
   if (els.filterCategory) els.filterCategory.value = "";
   if (els.filterDirection) els.filterDirection.value = "";
   if (els.groupMergeName) {
@@ -558,12 +570,48 @@ function getFiltered() {
   return sortTransactions(searched);
 }
 
-/** Detail table only: another smart-search layer on top of getFiltered(). */
+/** Detail table only: smart-search + amount-range layer on top of getFiltered(). */
+function readAmountRangesFromUi() {
+  return {
+    inMin: parseAmountBound(els.amtInMin?.value),
+    inMax: parseAmountBound(els.amtInMax?.value),
+    outMin: parseAmountBound(els.amtOutMin?.value),
+    outMax: parseAmountBound(els.amtOutMax?.value),
+    valMin: parseAmountBound(els.amtValMin?.value),
+    valMax: parseAmountBound(els.amtValMax?.value),
+  };
+}
+
+function hasAmountRangeFilter(ranges = readAmountRangesFromUi()) {
+  return (
+    ranges.inMin != null ||
+    ranges.inMax != null ||
+    ranges.outMin != null ||
+    ranges.outMax != null ||
+    ranges.valMin != null ||
+    ranges.valMax != null
+  );
+}
+
+function clearAmountFilterInputs() {
+  for (const el of [
+    els.amtInMin,
+    els.amtInMax,
+    els.amtOutMin,
+    els.amtOutMax,
+    els.amtValMin,
+    els.amtValMax,
+  ]) {
+    if (el) el.value = "";
+  }
+}
+
 function getTableFiltered() {
-  const base = getFiltered();
+  let list = getFiltered();
   const q = els.tableSearch?.value || "";
-  if (!String(q).trim()) return base;
-  return sortTransactions(smartSearch(base, q).map((r) => r.item));
+  if (String(q).trim()) list = smartSearch(list, q).map((r) => r.item);
+  list = filterByAmountRanges(list, readAmountRangesFromUi());
+  return sortTransactions(list);
 }
 
 function updateStats(visible) {
@@ -575,18 +623,56 @@ function updateStats(visible) {
   els.statIn.textContent = formatMoney(sumIn);
   els.statOut.textContent = formatMoney(sumOut);
   const tableQ = String(els.tableSearch?.value || "").trim();
+  const amtOn = hasAmountRangeFilter();
   const filterCount = getFiltered().length;
-  if (tableQ && visible.length !== filterCount) {
+  if ((tableQ || amtOn) && visible.length !== filterCount) {
     els.resultLabel.textContent = `ตาราง ${visible.length.toLocaleString("th-TH")} จากตัวกรอง ${filterCount.toLocaleString("th-TH")} · โปรเจกต์ ${state.transactions.length.toLocaleString("th-TH")} รายการ`;
   } else {
     els.resultLabel.textContent = `แสดง ${visible.length.toLocaleString("th-TH")} จาก ${state.transactions.length.toLocaleString("th-TH")} รายการ`;
   }
   if (els.bulkCount) els.bulkCount.textContent = `เลือก ${selectedIds.size.toLocaleString("th-TH")}`;
   if (els.tableSearchHint) {
-    els.tableSearchHint.textContent = tableQ
-      ? `ค้นหาตาราง: “${tableQ}” · ${visible.length.toLocaleString("th-TH")} แถว`
-      : "กรองอีกชั้นจากตัวกรองด้านบน";
+    const bits = [];
+    if (tableQ) bits.push(`ค้นหา “${tableQ}”`);
+    if (amtOn) bits.push("กรองช่วงยอด");
+    els.tableSearchHint.textContent = bits.length
+      ? `${bits.join(" · ")} · ${visible.length.toLocaleString("th-TH")} แถว`
+      : "กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้";
   }
+}
+
+function syncRowCheckUi(id) {
+  const row = [...(els.txBody?.querySelectorAll("tr[data-id]") || [])].find(
+    (r) => r.getAttribute("data-id") === id
+  );
+  if (!row) return;
+  const check = row.querySelector("[data-check]");
+  const on = selectedIds.has(id);
+  if (check) check.checked = on;
+  row.classList.toggle("is-selected", on);
+}
+
+function updateSelectionChrome() {
+  if (els.bulkCount) els.bulkCount.textContent = `เลือก ${selectedIds.size.toLocaleString("th-TH")}`;
+  const visible = (() => {
+    try {
+      return getTableFiltered();
+    } catch {
+      return [];
+    }
+  })();
+  if (els.checkAll) {
+    els.checkAll.checked = visible.length > 0 && visible.every((t) => selectedIds.has(t.id));
+    els.checkAll.indeterminate =
+      visible.some((t) => selectedIds.has(t.id)) && !els.checkAll.checked;
+  }
+}
+
+function applyRowSelect(id, mode) {
+  if (!id) return;
+  if (mode === "on") selectedIds.add(id);
+  else selectedIds.delete(id);
+  syncRowCheckUi(id);
 }
 
 function refreshCategoryOptions() {
@@ -1279,7 +1365,7 @@ function renderTable() {
     .map((t) => {
       const cat = t.category || "";
       const checked = selectedIds.has(t.id) ? "checked" : "";
-      return `<tr data-id="${t.id}">
+      return `<tr data-id="${t.id}" class="${selectedIds.has(t.id) ? "is-selected" : ""}">
         <td class="col-check"><input type="checkbox" data-check="${t.id}" ${checked} /></td>
         <td>${escapeHtml(formatDateTh(t.date))}${t.time ? `<div class="desc-sub">${escapeHtml(t.time)}</div>` : ""}</td>
         <td>
@@ -1310,6 +1396,63 @@ function renderTable() {
 function scheduleRender() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(renderTable, 100);
+}
+
+function wireTableRowDragSelect() {
+  const body = els.txBody;
+  if (!body || body.dataset.dragWired === "1") return;
+  body.dataset.dragWired = "1";
+
+  const endDrag = () => {
+    if (!rowDrag?.active) return;
+    rowDrag = null;
+    document.body.classList.remove("is-row-dragging");
+    updateSelectionChrome();
+  };
+
+  body.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("input:not([data-check]), textarea, select, button, a, .cell-cat, .cell-note")) {
+      return;
+    }
+    const row = e.target.closest("tr[data-id]");
+    if (!row) return;
+    const id = row.getAttribute("data-id");
+    if (!id) return;
+
+    const onCheck = e.target.closest("[data-check]");
+    // Intended mode = opposite of current selection for the starting row
+    const currentlyOn = selectedIds.has(id);
+    const mode = currentlyOn ? "off" : "on";
+
+    if (onCheck) {
+      // Own the toggle so change handler doesn't fight drag mode
+      e.preventDefault();
+    } else {
+      e.preventDefault();
+    }
+
+    rowDrag = { mode, active: true, touched: new Set([id]) };
+    document.body.classList.add("is-row-dragging");
+    applyRowSelect(id, mode);
+    updateSelectionChrome();
+  });
+
+  body.addEventListener("mouseover", (e) => {
+    if (!rowDrag?.active) return;
+    const row = e.target.closest("tr[data-id]");
+    if (!row) return;
+    const id = row.getAttribute("data-id");
+    if (!id || rowDrag.touched.has(id)) return;
+    rowDrag.touched.add(id);
+    applyRowSelect(id, rowDrag.mode);
+  });
+
+  window.addEventListener("mouseup", endDrag);
+  window.addEventListener("blur", endDrag);
+  body.addEventListener("dragstart", (e) => {
+    if (rowDrag?.active) e.preventDefault();
+  });
 }
 
 function followFilterAfterMove(prevCategories, nextCategory) {
@@ -2064,6 +2207,25 @@ function wireEvents() {
     els.tableSearch.focus();
   });
 
+  const amountInputs = [
+    els.amtInMin,
+    els.amtInMax,
+    els.amtOutMin,
+    els.amtOutMax,
+    els.amtValMin,
+    els.amtValMax,
+  ];
+  amountInputs.forEach((el) => {
+    el?.addEventListener("input", () => scheduleRender());
+    el?.addEventListener("change", () => scheduleRender());
+  });
+  els.btnClearAmountFilters?.addEventListener("click", () => {
+    clearAmountFilterInputs();
+    scheduleRender();
+  });
+
+  wireTableRowDragSelect();
+
   els.addGroupForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!requireLogin()) return;
@@ -2115,7 +2277,9 @@ function wireEvents() {
       const id = check.getAttribute("data-check");
       if (check.checked) selectedIds.add(id);
       else selectedIds.delete(id);
-      if (els.bulkCount) els.bulkCount.textContent = `เลือก ${selectedIds.size.toLocaleString("th-TH")}`;
+      const row = check.closest("tr");
+      if (row) row.classList.toggle("is-selected", check.checked);
+      updateSelectionChrome();
       return;
     }
     const note = e.target.closest("[data-note]");

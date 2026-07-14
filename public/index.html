@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=35" />
+  <link rel="stylesheet" href="css/app.css?v=36" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -152,7 +152,29 @@
           />
           <button type="button" class="btn quiet tiny" id="btn-clear-table-search" title="ล้างค้นหาตาราง">ล้าง</button>
         </div>
-        <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน</span>
+        <div class="amount-filters" id="amount-filters" aria-label="กรองช่วงยอดเงิน">
+          <span class="amount-filters-title">ช่วงยอด</span>
+          <label class="amount-range">
+            <span>เข้า</span>
+            <input id="amt-in-min" type="number" inputmode="decimal" min="0" step="any" placeholder="ต่ำ" aria-label="เข้าต่ำสุด" />
+            <span class="amount-sep">–</span>
+            <input id="amt-in-max" type="number" inputmode="decimal" min="0" step="any" placeholder="สูง" aria-label="เข้าสูงสุด" />
+          </label>
+          <label class="amount-range">
+            <span>ออก</span>
+            <input id="amt-out-min" type="number" inputmode="decimal" min="0" step="any" placeholder="ต่ำ" aria-label="ออกต่ำสุด" />
+            <span class="amount-sep">–</span>
+            <input id="amt-out-max" type="number" inputmode="decimal" min="0" step="any" placeholder="สูง" aria-label="ออกสูงสุด" />
+          </label>
+          <label class="amount-range">
+            <span>มูลค่า</span>
+            <input id="amt-val-min" type="number" inputmode="decimal" min="0" step="any" placeholder="ต่ำ" aria-label="มูลค่าต่ำสุด" />
+            <span class="amount-sep">–</span>
+            <input id="amt-val-max" type="number" inputmode="decimal" min="0" step="any" placeholder="สูง" aria-label="มูลค่าสูงสุด" />
+          </label>
+          <button type="button" class="btn quiet tiny" id="btn-clear-amount-filters" title="ล้างตัวกรองยอด">ล้างยอด</button>
+        </div>
+        <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้</span>
       </div>
 
       <div class="table-scroll">
@@ -182,6 +204,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
-  <script type="module" src="js/app.js?v=35"></script>
+  <script type="module" src="js/app.js?v=36"></script>
 </body>
 </html>
