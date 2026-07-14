@@ -84,19 +84,28 @@ assert(isReservedCategoryName("__uncat"), "reserve __uncat");
 assert(isReservedCategoryName("ยังไม่มีกลุ่ม"), "reserve thai uncat label");
 assert(!isReservedCategoryName("Shopee"), "allow normal name");
 
-// Peerland phase 1–3 curated starter
+// Peerland phase 1–5
 {
-  const { buildPeerlandPhase123Rules } = await import("../public/js/peerland-phases.js");
+  const { applyPeerlandPhasesAll, PEERLAND_PHASE_META } = await import("../public/js/peerland-phases.js");
   const { upsertRule: up, applyRules: ap } = await import("../public/js/storage.js");
   const txs = load("peerland_2024-2025.json");
-  const rules = buildPeerlandPhase123Rules(up);
-  const applied = ap(txs, rules);
+  const applied = applyPeerlandPhasesAll(txs, up, ap);
   const uncat = applied.transactions.filter((t) => !t.category).length;
-  console.log("\npeerland phase123 applied=", applied.applied, "uncat left=", uncat, "rules=", rules.length);
-  assert(rules.length >= 40, "peerland phase123 keeps curated rules");
-  assert(applied.applied > 1000, "peerland phase123 tags a large meaningful chunk");
-  assert(applied.applied < 2000, "peerland phase123 does not swallow almost all rows");
-  assert(uncat > 800, "peerland phase123 leaves long-tail for phase 4–5");
+  console.log(
+    "\npeerland phase1-5 applied=",
+    applied.applied,
+    "rules=",
+    applied.appliedRules,
+    "heur=",
+    applied.appliedHeuristics,
+    "uncat=",
+    uncat,
+    "groupsMeta=",
+    PEERLAND_PHASE_META.totalGroups
+  );
+  assert(PEERLAND_PHASE_META.totalGroups >= 35, "peerland has expanded group set");
+  assert(applied.applied === txs.length, "peerland phase1-5 covers all rows");
+  assert(uncat === 0, "peerland phase1-5 leaves no uncategorized");
 }
 
 if (failed) {

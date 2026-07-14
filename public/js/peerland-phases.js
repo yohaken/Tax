@@ -1,11 +1,10 @@
 /**
- * Peerland grouping plan — Phases 1–3
+ * Peerland grouping plan — Phases 1–5
  *
- * Phase 1 (6): platforms / fees / invest — high confidence
- * Phase 2 (2): self + family
- * Phase 3 (~20): top recurring counterparties (n≥~20 or high value)
+ * 1 platforms/fees/invest · 2 self/family · 3 top counterparties
+ * 4 expense type buckets · 5 long-tail heuristics (บุคคล/พร้อมเพย์/อื่นๆ)
  *
- * Keyword rule: one language per rule (Thai OR Latin) so primary-match works.
+ * Keyword rule: one language per rule; curated:true for short tokens.
  */
 
 export const PEERLAND_PHASE1_CATEGORIES = [
@@ -22,7 +21,6 @@ export const PEERLAND_PHASE2_CATEGORIES = [
   "โอนครอบครัว / เครือญาติ",
 ];
 
-/** Named customer / partner subgroups (Phase 3). */
 export const PEERLAND_PHASE3_CATEGORIES = [
   "ลูกค้า · Malinee",
   "ลูกค้า · ภัทราวุฒิ",
@@ -49,14 +47,28 @@ export const PEERLAND_PHASE3_CATEGORIES = [
   "คู่ค้า · ภูริภัทร์",
 ];
 
+export const PEERLAND_PHASE4_CATEGORIES = [
+  "น้ำมัน / พลังงาน",
+  "ฝากเงินสด / CDM",
+  "ถอนเงินสด",
+];
+
+export const PEERLAND_PHASE5_CATEGORIES = [
+  "รายได้บริษัท / นิติ",
+  "รายได้บุคคลทั่วไป",
+  "จ่ายพร้อมเพย์",
+  "จ่ายบุคคลทั่วไป",
+  "อื่นๆ",
+];
+
 export const PEERLAND_CATEGORIES = [
   ...PEERLAND_PHASE1_CATEGORIES,
   ...PEERLAND_PHASE2_CATEGORIES,
   ...PEERLAND_PHASE3_CATEGORIES,
-  "อื่นๆ",
+  ...PEERLAND_PHASE4_CATEGORIES,
+  ...PEERLAND_PHASE5_CATEGORIES,
 ];
 
-/** Phase 1 rules */
 export const PEERLAND_PHASE1_RULES = [
   { keywords: ["ช้อปปี้เพย์"], category: "Shopee / Lazada" },
   { keywords: ["shopee"], category: "Shopee / Lazada" },
@@ -70,7 +82,6 @@ export const PEERLAND_PHASE1_RULES = [
   { keywords: ["ksecurities"], category: "หลักทรัพย์ / ออม" },
 ];
 
-/** Phase 2 — self vs family (separate Thai/EN rules) */
 export const PEERLAND_PHASE2_RULES = [
   { keywords: ["phiraphong yohakh"], category: "โอนภายใน / ส่วนตัว" },
   { keywords: ["phiraphong"], category: "โอนภายใน / ส่วนตัว" },
@@ -81,7 +92,6 @@ export const PEERLAND_PHASE2_RULES = [
   { keywords: ["นิตยา ศรี"], category: "โอนครอบครัว / เครือญาติ" },
 ];
 
-/** Phase 3 — top counterparties */
 export const PEERLAND_PHASE3_RULES = [
   { keywords: ["malinee"], category: "ลูกค้า · Malinee" },
   { keywords: ["yottipa"], category: "ลูกค้า · Malinee" },
@@ -110,16 +120,61 @@ export const PEERLAND_PHASE3_RULES = [
   { keywords: ["ภูริภัทร์"], category: "คู่ค้า · ภูริภัทร์" },
 ];
 
+export const PEERLAND_PHASE4_RULES = [
+  { keywords: ["ปตท"], category: "น้ำมัน / พลังงาน" },
+  { keywords: ["ptt"], category: "น้ำมัน / พลังงาน" },
+  { keywords: ["บางจาก"], category: "น้ำมัน / พลังงาน" },
+  { keywords: ["shell"], category: "น้ำมัน / พลังงาน" },
+  { keywords: ["caltex"], category: "น้ำมัน / พลังงาน" },
+  { keywords: ["ฝากเงินสด"], category: "ฝากเงินสด / CDM" },
+  { keywords: ["cdm"], category: "ฝากเงินสด / CDM" },
+  { keywords: ["เคแบงก์เซอร์วิส"], category: "ฝากเงินสด / CDM" },
+  { keywords: ["ถอนเงิน"], category: "ถอนเงินสด" },
+];
+
+export const PEERLAND_PHASE1234_RULES = [
+  ...PEERLAND_PHASE1_RULES,
+  ...PEERLAND_PHASE2_RULES,
+  ...PEERLAND_PHASE3_RULES,
+  ...PEERLAND_PHASE4_RULES,
+].map((r) => ({ ...r, curated: true }));
+
+/** @deprecated alias — prefer PEERLAND_PHASE1234_RULES + phase5 heuristics */
 export const PEERLAND_PHASE123_RULES = [
   ...PEERLAND_PHASE1_RULES,
   ...PEERLAND_PHASE2_RULES,
   ...PEERLAND_PHASE3_RULES,
 ].map((r) => ({ ...r, curated: true }));
 
-/** Build rule objects ready for applyRules / state.rules */
-export function buildPeerlandPhase123Rules(upsertRule) {
+const PERSON_RE = /นาย\s|นางสาว\s|น\.ส\.\s|นาง\s|\bmr\.?\s|\bmiss\s|\bmrs\.?\s/i;
+const COMPANY_RE = /บจก\.?|บมจ\.?|บริษัท|co\.,?\s*ltd|limited|\blimit\b/i;
+
+/**
+ * Phase 5 — assign remaining uncategorized rows by heuristics (not keyword rules).
+ * Returns { transactions, applied }.
+ */
+export function applyPeerlandPhase5Heuristics(transactions) {
+  let applied = 0;
+  const next = transactions.map((tx) => {
+    if (String(tx.category || "").trim()) return tx;
+    const desc = String(tx.description || "");
+    let category = "";
+    if (tx.direction === "in" && COMPANY_RE.test(desc)) category = "รายได้บริษัท / นิติ";
+    else if (tx.direction === "in" && /รับโอนเงิน/i.test(desc) && PERSON_RE.test(desc)) {
+      category = "รายได้บุคคลทั่วไป";
+    } else if (tx.direction === "out" && /พร้อมเพย์/i.test(desc)) category = "จ่ายพร้อมเพย์";
+    else if (tx.direction === "out" && /โอนไป/i.test(desc) && PERSON_RE.test(desc)) {
+      category = "จ่ายบุคคลทั่วไป";
+    } else category = "อื่นๆ";
+    applied += 1;
+    return { ...tx, category, autoTagged: true };
+  });
+  return { transactions: next, applied };
+}
+
+export function buildPeerlandPhaseRules(upsertRule, specs = PEERLAND_PHASE1234_RULES) {
   let rules = [];
-  for (const spec of PEERLAND_PHASE123_RULES) {
+  for (const spec of specs) {
     rules = upsertRule(rules, {
       keywords: spec.keywords,
       category: spec.category,
@@ -129,10 +184,34 @@ export function buildPeerlandPhase123Rules(upsertRule) {
   return rules;
 }
 
+export function buildPeerlandPhase123Rules(upsertRule) {
+  return buildPeerlandPhaseRules(upsertRule, PEERLAND_PHASE123_RULES);
+}
+
+export function buildPeerlandPhase1234Rules(upsertRule) {
+  return buildPeerlandPhaseRules(upsertRule, PEERLAND_PHASE1234_RULES);
+}
+
+/** Apply keyword phases 1–4 then heuristic phase 5. */
+export function applyPeerlandPhasesAll(transactions, upsertRule, applyRules) {
+  const rules = buildPeerlandPhase1234Rules(upsertRule);
+  const stepped = applyRules(transactions, rules);
+  const phase5 = applyPeerlandPhase5Heuristics(stepped.transactions);
+  return {
+    transactions: phase5.transactions,
+    rules: stepped.rules,
+    applied: stepped.applied + phase5.applied,
+    appliedRules: stepped.applied,
+    appliedHeuristics: phase5.applied,
+  };
+}
+
 export const PEERLAND_PHASE_META = {
   phase1Groups: PEERLAND_PHASE1_CATEGORIES.length,
   phase2Groups: PEERLAND_PHASE2_CATEGORIES.length,
   phase3Groups: PEERLAND_PHASE3_CATEGORIES.length,
+  phase4Groups: PEERLAND_PHASE4_CATEGORIES.length,
+  phase5Groups: PEERLAND_PHASE5_CATEGORIES.length,
   totalGroups: PEERLAND_CATEGORIES.length,
-  ruleCount: PEERLAND_PHASE123_RULES.length,
+  ruleCount: PEERLAND_PHASE1234_RULES.length,
 };

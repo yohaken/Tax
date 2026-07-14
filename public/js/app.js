@@ -29,9 +29,11 @@ import {
 import { buildLabel } from "./build.js";
 import {
   PEERLAND_CATEGORIES,
-  PEERLAND_PHASE123_RULES,
+  PEERLAND_PHASE1234_RULES,
   PEERLAND_PHASE_META,
-  buildPeerlandPhase123Rules,
+  buildPeerlandPhase1234Rules,
+  applyPeerlandPhasesAll,
+  applyPeerlandPhase5Heuristics,
 } from "./peerland-phases.js";
 
 const workspace = loadWorkspace();
@@ -51,6 +53,7 @@ let searchTimer = null;
 let rendering = false;
 let pendingDemo = false;
 const selectedIds = new Set();
+const selectedGroupKeys = new Set();
 let tableSort = { key: "date", dir: "desc" };
 let groupSort = { key: "abs", dir: "desc" };
 let periodMode = "all"; // all | year:YYYY | custom
@@ -99,6 +102,11 @@ const els = {
   btnOpenTelltea: document.getElementById("btn-open-telltea"),
   btnOpenPeerland: document.getElementById("btn-open-peerland"),
   btnPeerlandPhases: document.getElementById("btn-peerland-phases"),
+  groupMergeBar: document.getElementById("group-merge-bar"),
+  groupMergeCount: document.getElementById("group-merge-count"),
+  groupMergeName: document.getElementById("group-merge-name"),
+  btnGroupMerge: document.getElementById("btn-group-merge"),
+  btnGroupMergeClear: document.getElementById("btn-group-merge-clear"),
   projectNameLabel: document.getElementById("project-name-label"),
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
@@ -205,6 +213,7 @@ function clearSessionUi() {
   undoStack.length = 0;
   updateUndoButton();
   selectedIds.clear();
+  selectedGroupKeys.clear();
   periodMode = "all";
   if (els.dateFrom) els.dateFrom.value = "";
   if (els.dateTo) els.dateTo.value = "";
@@ -212,6 +221,8 @@ function clearSessionUi() {
   if (els.tableSearch) els.tableSearch.value = "";
   if (els.filterCategory) els.filterCategory.value = "";
   if (els.filterDirection) els.filterDirection.value = "";
+  if (els.groupMergeName) els.groupMergeName.value = "";
+  updateGroupMergeBar();
 }
 
 function renderProjectSelect() {
@@ -724,6 +735,88 @@ function groupTotals(groups) {
   );
 }
 
+function updateGroupMergeBar() {
+  const n = selectedGroupKeys.size;
+  if (els.groupMergeCount) {
+    els.groupMergeCount.textContent = `เลือก ${n.toLocaleString("th-TH")} กลุ่ม`;
+  }
+  if (els.groupMergeBar) {
+    els.groupMergeBar.hidden = n === 0;
+  }
+  if (els.btnGroupMerge) {
+    els.btnGroupMerge.disabled = n < 2;
+  }
+}
+
+function mergeSelectedGroups() {
+  if (!requireLogin()) return;
+  const keys = [...selectedGroupKeys].filter((k) => k && k !== "__uncat");
+  if (keys.length < 2) {
+    toast("เลือกอย่างน้อย 2 กลุ่มเพื่อรวม");
+    return;
+  }
+  const next = String(els.groupMergeName?.value || "").trim();
+  if (!next) {
+    toast("ใส่ชื่อกลุ่มใหม่");
+    els.groupMergeName?.focus();
+    return;
+  }
+  if (isReservedCategoryName(next)) {
+    toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
+    return;
+  }
+  const busyOutside = state.transactions.some(
+    (t) => t.category === next && !keys.includes(t.category)
+  );
+  // next may equal one of the source keys (merge others into it) — that is OK
+  if (busyOutside && !keys.includes(next)) {
+    toast(`มีกลุ่ม “${next}” อยู่แล้ว และไม่ได้ถูกเลือก — เลือกกลุ่มนั้นด้วยหรือใช้ชื่ออื่น`);
+    return;
+  }
+
+  const counts = keys.map((k) => state.transactions.filter((t) => t.category === k).length);
+  const totalRows = counts.reduce((s, n) => s + n, 0);
+  const ok = window.confirm(
+    `รวม ${keys.length} กลุ่ม → “${next}”?\n\n` +
+      keys.map((k, i) => `· ${k} (${counts[i].toLocaleString("th-TH")})`).join("\n") +
+      `\n\nรวม ${totalRows.toLocaleString("th-TH")} รายการ · กดเลิกทำได้`
+  );
+  if (!ok) return;
+
+  withUndo(`รวมกลุ่มเป็น “${next}”`, () => {
+    for (const t of state.transactions) {
+      if (keys.includes(t.category)) t.category = next;
+    }
+    for (const r of state.rules) {
+      if (keys.includes(r.category)) r.category = next;
+    }
+    const noteParts = keys
+      .map((k) => String(state.groupNotes?.[k] || "").trim())
+      .filter(Boolean);
+    if (noteParts.length) {
+      state.groupNotes[next] = [...new Set(noteParts)].join(" · ");
+    }
+    for (const k of keys) {
+      if (k === next) continue;
+      delete state.groupNotes[k];
+      if (state.groupNicknames) delete state.groupNicknames[k];
+    }
+    state.categories = [
+      next,
+      ...state.categories.filter((c) => c !== next && !keys.includes(c)),
+    ];
+    if (els.filterCategory && keys.includes(els.filterCategory.value)) {
+      els.filterCategory.value = next;
+    }
+  });
+  selectedGroupKeys.clear();
+  if (els.groupMergeName) els.groupMergeName.value = "";
+  updateGroupMergeBar();
+  schedulePersist();
+  scheduleRender();
+  toast(`รวมเป็น “${next}” แล้ว · ${totalRows.toLocaleString("th-TH")} รายการ`);
+}
+
 function renderGroupSummary() {
   if (!els.groupList) return;
   renderPeriodChips();
@@ -734,6 +827,7 @@ function renderGroupSummary() {
 
   if (!groups.length) {
     els.groupList.innerHTML = `<div class="group-meta">ยังไม่มีรายการให้สรุปในช่วงนี้</div>`;
+    updateGroupMergeBar();
     return;
   }
 
@@ -741,6 +835,7 @@ function renderGroupSummary() {
   const head = `
     <thead>
       <tr>
+        <th class="col-check" title="ติ๊กเพื่อรวมกลุ่ม"></th>
         <th><button type="button" class="th-sort${groupSort.key === "name" ? " is-active" : ""}" data-group-sort="name">กลุ่ม${groupSortMarker("name")}</button></th>
         <th class="num"><button type="button" class="th-sort${groupSort.key === "count" ? " is-active" : ""}" data-group-sort="count">จำนวน${groupSortMarker("count")}</button></th>
         <th class="num"><button type="button" class="th-sort${groupSort.key === "in" ? " is-active" : ""}" data-group-sort="in">เงินเข้า${groupSortMarker("in")}</button></th>
@@ -755,7 +850,14 @@ function renderGroupSummary() {
     .map((g) => {
       const isActive = active === g.key;
       const gNote = state.groupNotes?.[g.key] || "";
-      return `<tr class="${isActive ? "is-active" : ""}" data-group="${escapeHtml(g.key)}">
+      const canMerge = g.key !== "__uncat";
+      const checked = canMerge && selectedGroupKeys.has(g.key) ? "checked" : "";
+      return `<tr class="${isActive ? "is-active" : ""}${selectedGroupKeys.has(g.key) ? " is-merge-picked" : ""}" data-group="${escapeHtml(g.key)}">
+        <td class="col-check">${
+          canMerge
+            ? `<input type="checkbox" data-group-check="${escapeHtml(g.key)}" ${checked} title="เลือกเพื่อรวมกลุ่ม" />`
+            : ""
+        }</td>
         <td>
           <div class="group-title-row">
             <button type="button" class="group-title-btn" data-filter-group="${escapeHtml(g.key)}" title="${escapeHtml(g.name)}">${escapeHtml(displayGroupName(g))}</button>
@@ -785,8 +887,10 @@ function renderGroupSummary() {
   const used = new Set(groups.map((g) => g.key));
   const emptyCats = (state.categories || []).filter((c) => c && !used.has(c) && !isReservedCategoryName(c));
   const emptyBody = emptyCats
-    .map(
-      (c) => `<tr class="is-empty-group" data-group="${escapeHtml(c)}">
+    .map((c) => {
+      const checked = selectedGroupKeys.has(c) ? "checked" : "";
+      return `<tr class="is-empty-group${selectedGroupKeys.has(c) ? " is-merge-picked" : ""}" data-group="${escapeHtml(c)}">
+        <td class="col-check"><input type="checkbox" data-group-check="${escapeHtml(c)}" ${checked} title="เลือกเพื่อรวมกลุ่ม" /></td>
         <td>
           <div class="group-title-row">
             <span class="group-title-btn muted">${escapeHtml(c)}</span>
@@ -801,12 +905,13 @@ function renderGroupSummary() {
         <td class="group-actions">
           <button type="button" class="btn quiet tiny" data-delete-group="${escapeHtml(c)}" title="ลบกลุ่มว่าง">ลบ</button>
         </td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join("");
 
   const foot = `<tfoot>
     <tr class="group-total-row">
+      <td></td>
       <td>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม${emptyCats.length ? ` · ว่าง ${emptyCats.length}` : ""})</td>
       <td class="num">${totals.count.toLocaleString("th-TH")}</td>
       <td class="num amount-in">${escapeHtml(formatMoney(totals.sumIn))}</td>
@@ -817,6 +922,7 @@ function renderGroupSummary() {
   </tfoot>`;
 
   els.groupList.innerHTML = `<table class="group-table">${head}<tbody>${body}${emptyBody}</tbody>${foot}</table>`;
+  updateGroupMergeBar();
 }
 
 function rowsForGroup(groupKey) {
@@ -1382,6 +1488,7 @@ async function loadBundledDataFile({
   starterCategories = null,
   starterRuleSpecs = null,
   applyStarterRules = false,
+  applyPhase5Heuristics = false,
 }) {
   if (!requireLogin()) return null;
   const existing = workspace.projects.find(
@@ -1428,6 +1535,11 @@ async function loadBundledDataFile({
     rules = applied.rules;
     auto = applied.applied;
   }
+  if (applyPhase5Heuristics) {
+    const h = applyPeerlandPhase5Heuristics(rows);
+    rows = h.transactions;
+    auto += h.applied;
+  }
 
   const project = createProjectFromRows({
     name: projectName || fileStem(fileName),
@@ -1465,13 +1577,14 @@ async function openPeerlandProject() {
     fileName: "peerland_2024-2025_full.pdf",
     projectName: "peerland_2024-2025",
     starterCategories: PEERLAND_CATEGORIES,
-    starterRuleSpecs: PEERLAND_PHASE123_RULES,
+    starterRuleSpecs: PEERLAND_PHASE1234_RULES,
     applyStarterRules: true,
+    applyPhase5Heuristics: true,
   });
 }
 
-/** Apply peerland phases 1–3 to uncategorized rows only (safe for existing projects). */
-function applyPeerlandPhases123() {
+/** Apply peerland phases 1–5 to uncategorized rows only. */
+function applyPeerlandPhases15() {
   if (!requireLogin()) return;
   if (!isPeerlandProject()) {
     toast("ปุ่มนี้ใช้กับโปรเจกต์ peerland เท่านั้น");
@@ -1483,35 +1596,35 @@ function applyPeerlandPhases123() {
     return;
   }
   const ok = window.confirm(
-    `จัดกลุ่ม peerland เฟส 1–3?\n\n` +
-      `· เฟส 1 แพลตฟอร์ม/ค่าธรรมเนียม/ลงทุน (${PEERLAND_PHASE_META.phase1Groups} กลุ่ม)\n` +
-      `· เฟส 2 ตัวเอง+ครอบครัว (${PEERLAND_PHASE_META.phase2Groups} กลุ่ม)\n` +
-      `· เฟส 3 ลูกค้า/คู่ค้ารายใหญ่ (${PEERLAND_PHASE_META.phase3Groups} กลุ่ม)\n\n` +
-      `จะติดเฉพาะรายการที่ยังไม่มีกลุ่ม (~${uncat.toLocaleString("th-TH")} รายการ)\n` +
-      `รวมชุดกลุ่ม ${PEERLAND_PHASE_META.totalGroups} ชื่อ · กดเลิกทำได้หลังจบ`
+    `จัดกลุ่ม peerland เฟส 1–5?\n\n` +
+      `· เฟส 1 แพลตฟอร์ม/ลงทุน (${PEERLAND_PHASE_META.phase1Groups})\n` +
+      `· เฟส 2 ตัวเอง+ครอบครัว (${PEERLAND_PHASE_META.phase2Groups})\n` +
+      `· เฟส 3 ลูกค้า/คู่ค้ารายใหญ่ (${PEERLAND_PHASE_META.phase3Groups})\n` +
+      `· เฟส 4 ค่าใช้จ่ายประเภท (${PEERLAND_PHASE_META.phase4Groups})\n` +
+      `· เฟส 5 หางยาว / อื่นๆ (${PEERLAND_PHASE_META.phase5Groups})\n\n` +
+      `ติดเฉพาะที่ยังว่าง (~${uncat.toLocaleString("th-TH")} รายการ)\n` +
+      `ชุดกลุ่ม ${PEERLAND_PHASE_META.totalGroups} ชื่อ · กดเลิกทำได้`
   );
   if (!ok) return;
 
   let appliedCount = 0;
-  withUndo("จัดกลุ่ม peerland เฟส 1–3", () => {
-    const phaseRules = buildPeerlandPhase123Rules(upsertRule);
+  withUndo("จัดกลุ่ม peerland เฟส 1–5", () => {
     state.categories = [...new Set([...PEERLAND_CATEGORIES, ...(state.categories || [])])];
+    const result = applyPeerlandPhasesAll(state.transactions, upsertRule, applyRules);
     const kept = (state.rules || []).filter((r) => !r.curated);
     const byKey = new Map();
-    for (const r of [...kept, ...phaseRules]) byKey.set(r.key, r);
+    for (const r of [...kept, ...result.rules]) byKey.set(r.key, r);
     state.rules = [...byKey.values()];
-    const applied = applyRules(state.transactions, phaseRules);
-    state.transactions = applied.transactions;
-    appliedCount = applied.applied;
+    state.transactions = result.transactions;
+    appliedCount = result.applied;
   });
   schedulePersist();
   scheduleRender();
+  const left = state.transactions.filter((t) => !String(t.category || "").trim()).length;
   toast(
     appliedCount > 0
-      ? `เฟส 1–3 ติดกลุ่ม ${appliedCount.toLocaleString("th-TH")} รายการ · เหลือว่าง ${(
-          state.transactions.filter((t) => !String(t.category || "").trim()).length
-        ).toLocaleString("th-TH")}`
-      : "ไม่พบรายการที่กฎเฟส 1–3 จับได้เพิ่ม"
+      ? `เฟส 1–5 ติดกลุ่ม ${appliedCount.toLocaleString("th-TH")} รายการ · เหลือว่าง ${left.toLocaleString("th-TH")}`
+      : "ไม่พบรายการที่กฎจับได้เพิ่ม"
   );
 }
 
@@ -1904,6 +2017,7 @@ function wireEvents() {
       renderGroupSummary();
       return;
     }
+    if (e.target.closest("[data-group-check]")) return;
     const renameBtn = e.target.closest("[data-rename-group]");
     if (renameBtn) {
       beginRenameGroup(renameBtn.getAttribute("data-rename-group"));
@@ -1930,6 +2044,29 @@ function wireEvents() {
     if (exportBtn) exportGroup(exportBtn.getAttribute("data-export-group"));
   });
 
+  els.groupList?.addEventListener("change", (e) => {
+    const check = e.target.closest("[data-group-check]");
+    if (check) {
+      const key = check.getAttribute("data-group-check");
+      if (!key || key === "__uncat") return;
+      if (check.checked) selectedGroupKeys.add(key);
+      else selectedGroupKeys.delete(key);
+      updateGroupMergeBar();
+      const row = check.closest("tr");
+      if (row) row.classList.toggle("is-merge-picked", check.checked);
+      return;
+    }
+    const note = e.target.closest("[data-group-note]");
+    if (!note) return;
+    const key = note.getAttribute("data-group-note");
+    const beforeVal = fieldBefore.get(note);
+    fieldBefore.delete(note);
+    if (beforeVal === undefined || beforeVal === note.value) return;
+    const before = cloneStateSlice();
+    before.groupNotes[key] = beforeVal;
+    pushUndo("แก้ Note กลุ่ม", before);
+  });
+
   els.groupList?.addEventListener("focusin", (e) => {
     const note = e.target.closest("[data-group-note]");
     if (note) rememberField(note);
@@ -1941,18 +2078,6 @@ function wireEvents() {
     const key = note.getAttribute("data-group-note");
     state.groupNotes[key] = note.value;
     schedulePersist();
-  });
-
-  els.groupList?.addEventListener("change", (e) => {
-    const note = e.target.closest("[data-group-note]");
-    if (!note) return;
-    const key = note.getAttribute("data-group-note");
-    const beforeVal = fieldBefore.get(note);
-    fieldBefore.delete(note);
-    if (beforeVal === undefined || beforeVal === note.value) return;
-    const before = cloneStateSlice();
-    before.groupNotes[key] = beforeVal;
-    pushUndo("แก้ Note กลุ่ม", before);
   });
 
   document.querySelectorAll(".th-sort").forEach((btn) => {
@@ -2029,7 +2154,14 @@ function wireEvents() {
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }).catch((err) => toast(err.message)));
   els.btnOpenTelltea?.addEventListener("click", () => openTellteaProject().catch((err) => toast(err.message)));
   els.btnOpenPeerland?.addEventListener("click", () => openPeerlandProject().catch((err) => toast(err.message)));
-  els.btnPeerlandPhases?.addEventListener("click", () => applyPeerlandPhases123());
+  els.btnPeerlandPhases?.addEventListener("click", () => applyPeerlandPhases15());
+  els.btnGroupMerge?.addEventListener("click", () => mergeSelectedGroups());
+  els.btnGroupMergeClear?.addEventListener("click", () => {
+    selectedGroupKeys.clear();
+    if (els.groupMergeName) els.groupMergeName.value = "";
+    updateGroupMergeBar();
+    renderGroupSummary();
+  });
   els.btnRenameProject?.addEventListener("click", renameActiveProject);
   els.btnDeleteProject?.addEventListener("click", deleteActiveProject);
   els.fileInputHero?.addEventListener("change", (e) => {
