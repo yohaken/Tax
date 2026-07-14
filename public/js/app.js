@@ -1526,7 +1526,7 @@ function wireEvents() {
       else toast("กำลังเปิดหน้าล็อกอิน Google…");
     } catch (err) {
       console.error(err);
-      toast(err.message || "ล็อกอินไม่สำเร็จ");
+      toast(`${err.message || "ล็อกอินไม่สำเร็จ"} · ${buildLabel()}`);
     }
   }
 
