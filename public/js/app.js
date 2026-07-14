@@ -34,7 +34,7 @@ let pendingPeerland = false;
 let pendingDemo = false;
 const selectedIds = new Set();
 let tableSort = { key: "date", dir: "desc" };
-let groupSortMode = "abs-desc";
+let groupSort = { key: "abs", dir: "desc" };
 
 const els = {
   loginGate: document.getElementById("login-gate"),
@@ -50,7 +50,6 @@ const els = {
   filterDirection: document.getElementById("filter-direction"),
   addGroupForm: document.getElementById("add-group-form"),
   newGroupName: document.getElementById("new-group-name"),
-  groupSort: document.getElementById("group-sort"),
   txBody: document.getElementById("tx-body"),
   resultLabel: document.getElementById("result-label"),
   categoryDatalist: document.getElementById("category-datalist"),
@@ -202,18 +201,29 @@ function getSummaryBase() {
   return smartSearch(list, els.search.value).map((r) => r.item);
 }
 
+function groupSortMarker(key) {
+  if (groupSort.key !== key) return "";
+  return groupSort.dir === "asc" ? " ↑" : " ↓";
+}
+
 function sortGroups(groups) {
-  const mode = groupSortMode || "abs-desc";
+  const dir = groupSort.dir === "asc" ? 1 : -1;
+  const key = groupSort.key || "abs";
   return [...groups].sort((a, b) => {
     if (a.key === "__uncat") return 1;
     if (b.key === "__uncat") return -1;
-    if (mode === "name-asc") return a.name.localeCompare(b.name, "th");
-    if (mode === "count-desc") return b.count - a.count;
-    if (mode === "in-desc") return b.sumIn - a.sumIn;
-    if (mode === "out-desc") return b.sumOut - a.sumOut;
-    if (mode === "net-desc") return b.net - a.net;
-    if (mode === "abs-asc") return Math.abs(a.sumIn + a.sumOut) - Math.abs(b.sumIn + b.sumOut);
-    return Math.abs(b.sumIn + b.sumOut) - Math.abs(a.sumIn + a.sumOut);
+    let cmp = 0;
+    if (key === "name") cmp = a.name.localeCompare(b.name, "th");
+    else if (key === "count") cmp = a.count - b.count;
+    else if (key === "in") cmp = a.sumIn - b.sumIn;
+    else if (key === "out") cmp = a.sumOut - b.sumOut;
+    else if (key === "net") cmp = a.net - b.net;
+    else if (key === "note") {
+      const an = state.groupNotes?.[a.key] || "";
+      const bn = state.groupNotes?.[b.key] || "";
+      cmp = an.localeCompare(bn, "th") || a.notes.length - b.notes.length;
+    } else cmp = Math.abs(a.sumIn + a.sumOut) - Math.abs(b.sumIn + b.sumOut);
+    return cmp * dir;
   });
 }
 
@@ -227,27 +237,42 @@ function renderGroupSummary() {
     return;
   }
 
-  els.groupList.innerHTML = groups
+  const head = `<div class="group-row group-head" role="row">
+    <div class="group-name">
+      <button type="button" class="th-sort${groupSort.key === "name" ? " is-active" : ""}" data-group-sort="name">กลุ่ม${groupSortMarker("name")}</button>
+    </div>
+    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "in" ? " is-active" : ""}" data-group-sort="in">เข้า${groupSortMarker("in")}</button></div>
+    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "out" ? " is-active" : ""}" data-group-sort="out">ออก${groupSortMarker("out")}</button></div>
+    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "net" ? " is-active" : ""}" data-group-sort="net">สุทธิ${groupSortMarker("net")}</button></div>
+    <div class="group-amt"><button type="button" class="th-sort${groupSort.key === "note" ? " is-active" : ""}" data-group-sort="note">Note${groupSortMarker("note")}</button></div>
+    <div class="group-actions" aria-hidden="true"></div>
+  </div>`;
+
+  const rows = groups
     .map((g) => {
       const isActive = active === g.key;
       const gNote = state.groupNotes?.[g.key] || "";
       return `<article class="group-row${isActive ? " is-active" : ""}" data-group="${escapeHtml(g.key)}">
         <div class="group-name">
           <button type="button" data-filter-group="${escapeHtml(g.key)}">${escapeHtml(g.name)}</button>
-          <div class="group-meta">${g.count.toLocaleString("th-TH")} รายการ · มูลค่า ${escapeHtml(formatMoney(g.sumIn + g.sumOut))}</div>
-          <input class="group-note" data-group-note="${escapeHtml(g.key)}" value="${escapeHtml(gNote)}" placeholder="Note ของกลุ่ม…" />
+          <div class="group-meta">${g.count.toLocaleString("th-TH")} รายการ${g.notePreview ? ` · Note: ${escapeHtml(g.notePreview)}` : ""}</div>
         </div>
         <div class="group-amt in"><small>เข้า</small>${escapeHtml(formatMoney(g.sumIn))}</div>
         <div class="group-amt out"><small>ออก</small>${escapeHtml(formatMoney(g.sumOut))}</div>
         <div class="group-amt"><small>สุทธิ</small>${escapeHtml(formatMoney(g.net))}</div>
+        <div class="group-amt group-note-cell">
+          <input class="group-note" data-group-note="${escapeHtml(g.key)}" value="${escapeHtml(gNote)}" placeholder="Note กลุ่ม…" />
+        </div>
         <div class="group-actions">
-          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}">ดู</button>
+          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}">ดูกลุ่ม</button>
           <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}">Export</button>
-          <button type="button" class="btn solid tiny" data-print-group="${escapeHtml(g.key)}">พิมพ์</button>
+          <button type="button" class="btn solid tiny" data-print-group="${escapeHtml(g.key)}">พิมพ์กลุ่มนี้</button>
         </div>
       </article>`;
     })
     .join("");
+
+  els.groupList.innerHTML = head + rows;
 }
 
 function rowsForGroup(groupKey) {
@@ -669,11 +694,6 @@ function wireEvents() {
     els.search.focus();
   });
 
-  els.groupSort?.addEventListener("change", () => {
-    groupSortMode = els.groupSort.value;
-    renderGroupSummary();
-  });
-
   els.addGroupForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!requireLogin()) return;
@@ -721,6 +741,17 @@ function wireEvents() {
   });
 
   els.groupList?.addEventListener("click", (e) => {
+    const sortBtn = e.target.closest("[data-group-sort]");
+    if (sortBtn) {
+      const key = sortBtn.getAttribute("data-group-sort");
+      if (groupSort.key === key) groupSort.dir = groupSort.dir === "asc" ? "desc" : "asc";
+      else {
+        groupSort.key = key;
+        groupSort.dir = key === "name" || key === "note" ? "asc" : "desc";
+      }
+      renderGroupSummary();
+      return;
+    }
     if (e.target.closest("[data-group-note]")) return;
     const filterBtn = e.target.closest("[data-filter-group]");
     if (filterBtn) {
