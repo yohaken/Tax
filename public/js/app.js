@@ -632,7 +632,10 @@ function renameGroup(oldName, newName) {
 
 function beginRenameGroup(groupKey) {
   if (!groupKey || groupKey === "__uncat") return;
-  const row = els.groupList?.querySelector(`[data-group="${CSS.escape(groupKey)}"] .group-name`);
+  const article = [...(els.groupList?.querySelectorAll("[data-group]") || [])].find(
+    (el) => el.getAttribute("data-group") === groupKey
+  );
+  const row = article?.querySelector(".group-name");
   if (!row || row.querySelector("[data-rename-form]")) return;
   const titleRow = row.querySelector(".group-title-row");
   if (!titleRow) return;
