@@ -32,7 +32,7 @@
   <main class="shell">
     <section class="hero" id="empty-state">
       <h1>TaxTag</h1>
-      <p>จัดหมวดรายการโอนแบบเรียบง่าย — พิมพ์คอมเมนต์ได้เลย ไม่ต้องกดบันทึก</p>
+      <p>จำแนกรายการเป็นกลุ่ม พร้อมสรุปยอดแยก — พิมพ์ Note ได้เลย ไม่ต้องกดบันทึก</p>
       <div class="hero-actions">
         <button type="button" class="btn solid" id="btn-peerland-hero">เปิด Peerland 2024–2025</button>
         <button type="button" class="btn quiet" id="btn-demo">ตัวอย่างสั้น</button>
@@ -42,10 +42,10 @@
 
     <section class="workspace is-hidden" id="workspace">
       <div class="filters">
-        <input id="search-input" type="search" placeholder="ค้นหาชื่อ · ยอดเงิน · หมวด…" autocomplete="off" />
-        <select id="filter-category" aria-label="หมวด">
-          <option value="">ทุกหมวด</option>
-          <option value="__uncat">ยังไม่มีหมวด</option>
+        <input id="search-input" type="search" placeholder="ค้นหาชื่อ · ยอดเงิน · กลุ่ม · note…" autocomplete="off" />
+        <select id="filter-category" aria-label="กลุ่ม">
+          <option value="">ทุกกลุ่ม</option>
+          <option value="__uncat">ยังไม่มีกลุ่ม</option>
         </select>
         <select id="filter-direction" aria-label="ทิศทาง">
           <option value="">เข้า/ออก</option>
@@ -58,10 +58,18 @@
 
       <div class="stats" id="stat-grid">
         <span><em id="stat-count">0</em> รายการ</span>
-        <span>ยังไม่ติดป้าย <em id="stat-uncat">0</em></span>
+        <span>ยังไม่ติดกลุ่ม <em id="stat-uncat">0</em></span>
         <span class="in">เข้า <em id="stat-in">฿0</em></span>
         <span class="out">ออก <em id="stat-out">฿0</em></span>
       </div>
+
+      <section class="group-summary" id="group-summary" aria-label="สรุปตามกลุ่ม">
+        <div class="group-summary-head">
+          <h2>สรุปตามกลุ่ม</h2>
+          <p>จำแนกรายการเป็นกลุ่ม แล้วยอดรวมแยกชัด — กดพิมพ์เฉพาะกลุ่มได้</p>
+        </div>
+        <div class="group-list" id="group-list"></div>
+      </section>
 
       <div class="table-scroll">
         <table class="tx-table" id="tx-table">
@@ -71,8 +79,8 @@
               <th>รายละเอียด</th>
               <th class="num">เข้า</th>
               <th class="num">ออก</th>
-              <th>หมวด</th>
-              <th>คอมเมนต์</th>
+              <th>กลุ่ม</th>
+              <th>Note</th>
             </tr>
           </thead>
           <tbody id="tx-body"></tbody>
@@ -81,6 +89,8 @@
       <p class="result-label" id="result-label">แสดง 0 รายการ</p>
     </section>
   </main>
+
+  <div id="print-root" class="print-root" hidden></div>
 
   <datalist id="category-datalist"></datalist>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

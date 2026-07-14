@@ -10,6 +10,7 @@ import {
   formatMoney,
   formatDateTh,
   exportWorkbook,
+  summarizeByGroup,
 } from "./storage.js";
 import {
   ALLOWED_EMAIL,
@@ -40,6 +41,8 @@ const els = {
   txBody: document.getElementById("tx-body"),
   resultLabel: document.getElementById("result-label"),
   categoryDatalist: document.getElementById("category-datalist"),
+  groupList: document.getElementById("group-list"),
+  printRoot: document.getElementById("print-root"),
   btnExport: document.getElementById("btn-export"),
   btnAuth: document.getElementById("btn-auth"),
   btnPeerland: document.getElementById("btn-peerland"),
@@ -127,7 +130,7 @@ function updateStats(visible) {
   els.statUncat.textContent = String(uncat);
   els.statIn.textContent = formatMoney(sumIn);
   els.statOut.textContent = formatMoney(sumOut);
-  els.resultLabel.textContent = `แสดง ${visible.length.toLocaleString("th-TH")} จาก ${state.transactions.length.toLocaleString("th-TH")} รายการ · แก้หมวด/คอมเมนต์แล้วเซฟเอง`;
+  els.resultLabel.textContent = `แสดง ${visible.length.toLocaleString("th-TH")} จาก ${state.transactions.length.toLocaleString("th-TH")} รายการ · แก้กลุ่ม/Note แล้วเซฟเอง`;
 }
 
 function refreshCategoryOptions() {
@@ -136,11 +139,129 @@ function refreshCategoryOptions() {
     .map((c) => `<option value="${escapeHtml(c)}"></option>`)
     .join("");
   els.filterCategory.innerHTML =
-    `<option value="">ทุกหมวด</option><option value="__uncat">ยังไม่มีหมวด</option>` +
+    `<option value="">ทุกกลุ่ม</option><option value="__uncat">ยังไม่มีกลุ่ม</option>` +
     state.categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
   if ([...els.filterCategory.options].some((o) => o.value === current)) {
     els.filterCategory.value = current;
   }
+}
+
+/** Base list for group totals: honor date/direction/search, but not category filter. */
+function getSummaryBase() {
+  let list = state.transactions;
+  const from = els.dateFrom.value;
+  const to = els.dateTo.value;
+  if (from) list = list.filter((t) => t.date && t.date >= from);
+  if (to) list = list.filter((t) => t.date && t.date <= to);
+  const dir = els.filterDirection.value;
+  if (dir) list = list.filter((t) => t.direction === dir);
+  return smartSearch(list, els.search.value).map((r) => r.item);
+}
+
+function renderGroupSummary() {
+  if (!els.groupList) return;
+  const groups = summarizeByGroup(getSummaryBase());
+  const active = els.filterCategory.value || "";
+
+  if (!groups.length) {
+    els.groupList.innerHTML = `<div class="group-meta">ยังไม่มีรายการให้สรุป</div>`;
+    return;
+  }
+
+  els.groupList.innerHTML = groups
+    .map((g) => {
+      const isActive = active === g.key;
+      return `<article class="group-row${isActive ? " is-active" : ""}" data-group="${escapeHtml(g.key)}">
+        <div class="group-name">
+          <button type="button" data-filter-group="${escapeHtml(g.key)}">${escapeHtml(g.name)}</button>
+          <div class="group-meta">${g.count.toLocaleString("th-TH")} รายการ${g.notePreview ? ` · Note: ${escapeHtml(g.notePreview)}` : ""}</div>
+        </div>
+        <div class="group-amt in"><small>เข้า</small>${escapeHtml(formatMoney(g.sumIn))}</div>
+        <div class="group-amt out"><small>ออก</small>${escapeHtml(formatMoney(g.sumOut))}</div>
+        <div class="group-amt"><small>สุทธิ</small>${escapeHtml(formatMoney(g.net))}</div>
+        <div class="group-amt"><small>Note</small>${g.notes.length ? g.notes.length.toLocaleString("th-TH") : "—"}</div>
+        <div class="group-actions">
+          <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}">ดูกลุ่ม</button>
+          <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}">Export</button>
+          <button type="button" class="btn solid tiny" data-print-group="${escapeHtml(g.key)}">พิมพ์กลุ่มนี้</button>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+function rowsForGroup(groupKey) {
+  const base = getSummaryBase();
+  if (groupKey === "__uncat") return base.filter((t) => !t.category);
+  return base.filter((t) => t.category === groupKey);
+}
+
+function groupTitle(groupKey) {
+  return groupKey === "__uncat" ? "ยังไม่มีกลุ่ม" : groupKey;
+}
+
+function printGroup(groupKey) {
+  const rows = rowsForGroup(groupKey).sort(
+    (a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0)
+  );
+  if (!rows.length) {
+    toast("กลุ่มนี้ยังไม่มีรายการ");
+    return;
+  }
+  const sumIn = rows.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
+  const sumOut = rows.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
+  const noteBits = [...new Set(rows.map((t) => t.note).filter(Boolean))];
+
+  els.printRoot.hidden = false;
+  els.printRoot.innerHTML = `
+    <h1>TaxTag · ${escapeHtml(groupTitle(groupKey))}</h1>
+    <p class="print-sub">${rows.length.toLocaleString("th-TH")} รายการ
+      · เข้า ${escapeHtml(formatMoney(sumIn))}
+      · ออก ${escapeHtml(formatMoney(sumOut))}
+      · สุทธิ ${escapeHtml(formatMoney(sumIn - sumOut))}
+      ${noteBits.length ? `<br/>Note: ${escapeHtml(noteBits.join(" · "))}` : ""}
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>วันที่</th>
+          <th>รายละเอียด</th>
+          <th class="num">เข้า</th>
+          <th class="num">ออก</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(
+            (t) => `<tr>
+            <td>${escapeHtml(formatDateTh(t.date))}</td>
+            <td>${escapeHtml(t.description)}</td>
+            <td class="num">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : ""}</td>
+            <td class="num">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : ""}</td>
+            <td>${escapeHtml(t.note || "")}</td>
+          </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>
+    <p class="totals">รวมเข้า ${escapeHtml(formatMoney(sumIn))} · รวมออก ${escapeHtml(formatMoney(sumOut))} · สุทธิ ${escapeHtml(formatMoney(sumIn - sumOut))}</p>
+  `;
+  window.print();
+  setTimeout(() => {
+    els.printRoot.hidden = true;
+    els.printRoot.innerHTML = "";
+  }, 300);
+}
+
+function exportGroup(groupKey) {
+  const rows = rowsForGroup(groupKey);
+  if (!rows.length) {
+    toast("กลุ่มนี้ยังไม่มีรายการ");
+    return;
+  }
+  exportWorkbook(rows, { groups: summarizeByGroup(rows) });
+  toast(`Export กลุ่ม “${groupTitle(groupKey)}” · ${rows.length.toLocaleString("th-TH")} รายการ`);
 }
 
 function renderTable() {
@@ -152,10 +273,10 @@ function renderTable() {
   refreshCategoryOptions();
 
   const visible = getFiltered();
-  // Cap DOM rows for snappy UI; search narrows naturally.
   const MAX = 400;
   const slice = visible.slice(0, MAX);
   updateStats(visible);
+  renderGroupSummary();
 
   els.txBody.innerHTML = slice
     .map((t) => {
@@ -168,8 +289,8 @@ function renderTable() {
         </td>
         <td class="num amount-in">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
         <td class="num amount-out">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
-        <td><input class="cell-cat${cat ? " has-value" : ""}" list="category-datalist" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="หมวด…" /></td>
-        <td><input class="cell-note" data-note="${t.id}" value="${escapeHtml(t.note || "")}" placeholder="คอมเมนต์…" /></td>
+        <td><input class="cell-cat${cat ? " has-value" : ""}" list="category-datalist" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="กลุ่ม…" /></td>
+        <td><input class="cell-note" data-note="${t.id}" value="${escapeHtml(t.note || "")}" placeholder="Note…" /></td>
       </tr>`;
     })
     .join("");
@@ -410,13 +531,32 @@ function wireEvents() {
     scheduleRender();
   });
 
+  els.groupList?.addEventListener("click", (e) => {
+    const filterBtn = e.target.closest("[data-filter-group]");
+    if (filterBtn) {
+      const key = filterBtn.getAttribute("data-filter-group");
+      els.filterCategory.value = key;
+      scheduleRender();
+      return;
+    }
+    const printBtn = e.target.closest("[data-print-group]");
+    if (printBtn) {
+      printGroup(printBtn.getAttribute("data-print-group"));
+      return;
+    }
+    const exportBtn = e.target.closest("[data-export-group]");
+    if (exportBtn) {
+      exportGroup(exportBtn.getAttribute("data-export-group"));
+    }
+  });
+
   els.btnExport.addEventListener("click", () => {
     const rows = getFiltered();
     if (!rows.length) {
       toast("ยังไม่มีข้อมูลให้ Export");
       return;
     }
-    exportWorkbook(rows);
+    exportWorkbook(rows, { groups: summarizeByGroup(getSummaryBase()) });
     toast(`Export XLSX · ${rows.length.toLocaleString("th-TH")} รายการ`);
   });
 

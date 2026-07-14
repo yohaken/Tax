@@ -229,19 +229,71 @@ export function formatDateTh(iso) {
   }).format(dt);
 }
 
-export function exportWorkbook(transactions) {
+export function summarizeByGroup(transactions) {
+  const map = new Map();
+  for (const t of transactions) {
+    const key = (t.category || "").trim() || "__uncat";
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        name: key === "__uncat" ? "ยังไม่มีกลุ่ม" : key,
+        count: 0,
+        sumIn: 0,
+        sumOut: 0,
+        notes: [],
+      });
+    }
+    const g = map.get(key);
+    g.count += 1;
+    if (t.direction === "in") g.sumIn += t.amount || 0;
+    else if (t.direction === "out") g.sumOut += t.amount || 0;
+    if (t.note && t.note.trim()) g.notes.push(t.note.trim());
+  }
+
+  return [...map.values()]
+    .map((g) => ({
+      ...g,
+      net: g.sumIn - g.sumOut,
+      notePreview: [...new Set(g.notes)].slice(0, 3).join(" · "),
+    }))
+    .sort((a, b) => {
+      if (a.key === "__uncat") return 1;
+      if (b.key === "__uncat") return -1;
+      return Math.abs(b.sumIn + b.sumOut) - Math.abs(a.sumIn + a.sumOut);
+    });
+}
+
+export function exportWorkbook(transactions, { groups } = {}) {
   if (!globalThis.XLSX) throw new Error("ไม่พบไลบรารี Excel");
   const rows = transactions.map((t) => ({
     วันที่: t.date,
     รายละเอียด: t.description,
-    เงินเข้า: t.credit ?? "",
-    เงินออก: t.debit ?? "",
-    หมวดหมู่: t.category || "",
-    หมายเหตุ: t.note || "",
+    เงินเข้า: t.direction === "in" ? t.amount ?? "" : "",
+    เงินออก: t.direction === "out" ? t.amount ?? "" : "",
+    กลุ่ม: t.category || "",
+    Note: t.note || "",
     แหล่งที่มา: t.source || "",
   }));
-  const sheet = globalThis.XLSX.utils.json_to_sheet(rows);
+  const summarySource = groups || summarizeByGroup(transactions);
+  const summaryRows = summarySource.map((g) => ({
+    กลุ่ม: g.name,
+    จำนวนรายการ: g.count,
+    เงินเข้า: g.sumIn,
+    เงินออก: g.sumOut,
+    สุทธิ: g.net,
+    Note: g.notePreview || "",
+  }));
+
   const book = globalThis.XLSX.utils.book_new();
-  globalThis.XLSX.utils.book_append_sheet(book, sheet, "TaxTag");
+  globalThis.XLSX.utils.book_append_sheet(
+    book,
+    globalThis.XLSX.utils.json_to_sheet(summaryRows),
+    "สรุปกลุ่ม"
+  );
+  globalThis.XLSX.utils.book_append_sheet(
+    book,
+    globalThis.XLSX.utils.json_to_sheet(rows),
+    "รายการ"
+  );
   globalThis.XLSX.writeFile(book, `taxtag-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
