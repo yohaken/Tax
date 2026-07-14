@@ -27,6 +27,12 @@ import {
   pushCloudState,
 } from "./firebase.js";
 import { buildLabel } from "./build.js";
+import {
+  PEERLAND_CATEGORIES,
+  PEERLAND_PHASE123_RULES,
+  PEERLAND_PHASE_META,
+  buildPeerlandPhase123Rules,
+} from "./peerland-phases.js";
 
 const workspace = loadWorkspace();
 const state = loadState();
@@ -52,28 +58,6 @@ let syncingPeriod = false;
 const undoStack = [];
 const MAX_UNDO = 40;
 const fieldBefore = new WeakMap();
-
-const PEERLAND_CATEGORIES = [
-  "รายได้ลูกค้า / QR",
-  "Shopee / Lazada",
-  "ชำระบัตรกสิกร",
-  "โอนภายใน / ส่วนตัว",
-  "ค่าธรรมเนียม",
-  "สินค้า / ซูเปอร์มาร์เก็ต",
-  "หลักทรัพย์ / ออม",
-  "อื่นๆ",
-];
-
-const PEERLAND_RULES = [
-  { keywords: ["ช้อปปี้เพย์", "shopee"], category: "Shopee / Lazada" },
-  { keywords: ["lazada"], category: "Shopee / Lazada" },
-  { keywords: ["บัตรกสิกรไทย"], category: "ชำระบัตรกสิกร" },
-  { keywords: ["ค่าธรรมเนียม"], category: "ค่าธรรมเนียม" },
-  { keywords: ["my qr"], category: "รายได้ลูกค้า / QR" },
-  { keywords: ["ซีพี แอ็กซ์ตร้า", "cp axtra"], category: "สินค้า / ซูเปอร์มาร์เก็ต" },
-  { keywords: ["ksecurities", "หลักทรัพย์"], category: "หลักทรัพย์ / ออม" },
-  { keywords: ["phiraphong yohakh", "พีระพงษ์"], category: "โอนภายใน / ส่วนตัว" },
-];
 
 const els = {
   loginGate: document.getElementById("login-gate"),
@@ -114,6 +98,7 @@ const els = {
   btnRenameProject: document.getElementById("btn-rename-project"),
   btnOpenTelltea: document.getElementById("btn-open-telltea"),
   btnOpenPeerland: document.getElementById("btn-open-peerland"),
+  btnPeerlandPhases: document.getElementById("btn-peerland-phases"),
   projectNameLabel: document.getElementById("project-name-label"),
   projectSelect: document.getElementById("project-select"),
   btnAuth: document.getElementById("btn-auth"),
@@ -200,6 +185,14 @@ function paintProjectNickUi() {
   if (els.projectFileHint) {
     els.projectFileHint.textContent = state.fileName ? `ไฟล์: ${state.fileName}` : "ไฟล์: —";
   }
+  if (els.btnPeerlandPhases) {
+    els.btnPeerlandPhases.hidden = !isPeerlandProject();
+  }
+}
+
+function isPeerlandProject() {
+  const blob = `${state.fileName || ""} ${state.projectName || ""}`;
+  return /peerland/i.test(blob);
 }
 
 function displayGroupName(g) {
@@ -1421,7 +1414,11 @@ async function loadBundledDataFile({
   let rules = [];
   if (Array.isArray(starterRuleSpecs) && starterRuleSpecs.length) {
     for (const spec of starterRuleSpecs) {
-      rules = upsertRule(rules, { keywords: spec.keywords, category: spec.category });
+      rules = upsertRule(rules, {
+        keywords: spec.keywords,
+        category: spec.category,
+        curated: spec.curated !== false,
+      });
     }
   }
   let auto = 0;
@@ -1468,9 +1465,54 @@ async function openPeerlandProject() {
     fileName: "peerland_2024-2025_full.pdf",
     projectName: "peerland_2024-2025",
     starterCategories: PEERLAND_CATEGORIES,
-    starterRuleSpecs: PEERLAND_RULES,
+    starterRuleSpecs: PEERLAND_PHASE123_RULES,
     applyStarterRules: true,
   });
+}
+
+/** Apply peerland phases 1–3 to uncategorized rows only (safe for existing projects). */
+function applyPeerlandPhases123() {
+  if (!requireLogin()) return;
+  if (!isPeerlandProject()) {
+    toast("ปุ่มนี้ใช้กับโปรเจกต์ peerland เท่านั้น");
+    return;
+  }
+  const uncat = state.transactions.filter((t) => !String(t.category || "").trim()).length;
+  if (!uncat) {
+    toast("ไม่มีรายการที่ยังว่างให้จัดกลุ่ม");
+    return;
+  }
+  const ok = window.confirm(
+    `จัดกลุ่ม peerland เฟส 1–3?\n\n` +
+      `· เฟส 1 แพลตฟอร์ม/ค่าธรรมเนียม/ลงทุน (${PEERLAND_PHASE_META.phase1Groups} กลุ่ม)\n` +
+      `· เฟส 2 ตัวเอง+ครอบครัว (${PEERLAND_PHASE_META.phase2Groups} กลุ่ม)\n` +
+      `· เฟส 3 ลูกค้า/คู่ค้ารายใหญ่ (${PEERLAND_PHASE_META.phase3Groups} กลุ่ม)\n\n` +
+      `จะติดเฉพาะรายการที่ยังไม่มีกลุ่ม (~${uncat.toLocaleString("th-TH")} รายการ)\n` +
+      `รวมชุดกลุ่ม ${PEERLAND_PHASE_META.totalGroups} ชื่อ · กดเลิกทำได้หลังจบ`
+  );
+  if (!ok) return;
+
+  let appliedCount = 0;
+  withUndo("จัดกลุ่ม peerland เฟส 1–3", () => {
+    const phaseRules = buildPeerlandPhase123Rules(upsertRule);
+    state.categories = [...new Set([...PEERLAND_CATEGORIES, ...(state.categories || [])])];
+    const kept = (state.rules || []).filter((r) => !r.curated);
+    const byKey = new Map();
+    for (const r of [...kept, ...phaseRules]) byKey.set(r.key, r);
+    state.rules = [...byKey.values()];
+    const applied = applyRules(state.transactions, phaseRules);
+    state.transactions = applied.transactions;
+    appliedCount = applied.applied;
+  });
+  schedulePersist();
+  scheduleRender();
+  toast(
+    appliedCount > 0
+      ? `เฟส 1–3 ติดกลุ่ม ${appliedCount.toLocaleString("th-TH")} รายการ · เหลือว่าง ${(
+          state.transactions.filter((t) => !String(t.category || "").trim()).length
+        ).toLocaleString("th-TH")}`
+      : "ไม่พบรายการที่กฎเฟส 1–3 จับได้เพิ่ม"
+  );
 }
 
 async function ensureTellteaProjectSeeded() {
@@ -1987,6 +2029,7 @@ function wireEvents() {
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }).catch((err) => toast(err.message)));
   els.btnOpenTelltea?.addEventListener("click", () => openTellteaProject().catch((err) => toast(err.message)));
   els.btnOpenPeerland?.addEventListener("click", () => openPeerlandProject().catch((err) => toast(err.message)));
+  els.btnPeerlandPhases?.addEventListener("click", () => applyPeerlandPhases123());
   els.btnRenameProject?.addEventListener("click", renameActiveProject);
   els.btnDeleteProject?.addEventListener("click", deleteActiveProject);
   els.fileInputHero?.addEventListener("change", (e) => {

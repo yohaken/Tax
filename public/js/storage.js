@@ -301,8 +301,14 @@ export function extractKeywords(description) {
   return sanitizeRuleKeywords(picks).slice(0, 3);
 }
 
-export function upsertRule(rules, { keywords, category }) {
-  const cleaned = sanitizeRuleKeywords(keywords);
+export function upsertRule(rules, { keywords, category, curated = false }) {
+  const cleaned = curated
+    ? [...new Set(
+        (keywords || [])
+          .map((k) => String(k).toLowerCase().replace(/\s+/g, " ").trim())
+          .filter((k) => k.length >= 2)
+      )]
+    : sanitizeRuleKeywords(keywords);
   if (!cleaned.length || !category || isReservedCategoryName(category)) return rules;
   const key = cleaned.slice().sort().join("|") + "::" + category;
   const next = rules.filter((r) => r.key !== key);
@@ -311,10 +317,11 @@ export function upsertRule(rules, { keywords, category }) {
     key,
     keywords: cleaned,
     category,
+    curated: Boolean(curated),
     hits: 0,
     createdAt: new Date().toISOString(),
   });
-  return next.slice(0, 80);
+  return next.slice(0, 120);
 }
 
 export function matchRule(tx, rules) {
@@ -322,26 +329,35 @@ export function matchRule(tx, rules) {
   let best = null;
   let bestScore = 0;
   for (const rule of rules) {
-    // Only specific keywords may trigger a match (ignore leftover generics in old rules).
-    const useful = sanitizeRuleKeywords(rule.keywords).sort((a, b) => b.length - a.length);
+    // Curated (human) rules keep short tokens like "my qr"; learned rules stay sanitized.
+    const useful = (
+      rule.curated
+        ? (rule.keywords || [])
+            .map((k) => String(k).toLowerCase().replace(/\s+/g, " ").trim())
+            .filter((k) => k.length >= 2)
+        : sanitizeRuleKeywords(rule.keywords)
+    ).sort((a, b) => b.length - a.length);
     if (!useful.length) continue;
     // Longest / primary keyword must match — blocks bloated rules with one broad token
     const primary = useful[0];
     if (!hay.includes(primary)) continue;
     const hits = useful.filter((kw) => hay.includes(kw));
     if (!hits.length) continue;
-    const hasStrong = hits.some((k) => k.length >= 5 || /[a-z]{4,}/i.test(k));
+    const hasStrong = rule.curated
+      ? hits.some((k) => k.length >= 2)
+      : hits.some((k) => k.length >= 5 || /[a-z]{4,}/i.test(k));
     if (!hasStrong) continue;
     let score = hits.reduce((s, kw) => s + Math.min(kw.length, 16), 0);
     score += hits.length * 2;
     score += Math.floor((hits.length / useful.length) * 6);
     score += Math.min(primary.length, 12);
-    if (score > bestScore) {
+    const threshold = rule.curated ? 6 : 12;
+    if (score > bestScore && score >= threshold) {
       bestScore = score;
       best = { ...rule, keywords: useful };
     }
   }
-  return bestScore >= 12 ? best : null;
+  return best;
 }
 
 export function previewApplyRules(transactions, rules) {

@@ -84,25 +84,19 @@ assert(isReservedCategoryName("__uncat"), "reserve __uncat");
 assert(isReservedCategoryName("ยังไม่มีกลุ่ม"), "reserve thai uncat label");
 assert(!isReservedCategoryName("Shopee"), "allow normal name");
 
-// Peerland starter rules shouldn't mass-tag everything via generics
+// Peerland phase 1–3 curated starter
 {
+  const { buildPeerlandPhase123Rules } = await import("../public/js/peerland-phases.js");
+  const { upsertRule: up, applyRules: ap } = await import("../public/js/storage.js");
   const txs = load("peerland_2024-2025.json");
-  const specs = [
-    { keywords: ["ช้อปปี้เพย์", "shopee"], category: "Shopee / Lazada" },
-    { keywords: ["lazada"], category: "Shopee / Lazada" },
-    { keywords: ["บัตรกสิกรไทย"], category: "ชำระบัตรกสิกร" },
-    { keywords: ["ค่าธรรมเนียม"], category: "ค่าธรรมเนียม" },
-    { keywords: ["my qr"], category: "รายได้ลูกค้า / QR" },
-    { keywords: ["phiraphong yohakh", "พีระพงษ์"], category: "โอนภายใน / ส่วนตัว" },
-  ];
-  let rules = [];
-  for (const s of specs) rules = upsertRule(rules, s);
-  const applied = applyRules(txs, rules);
+  const rules = buildPeerlandPhase123Rules(up);
+  const applied = ap(txs, rules);
   const uncat = applied.transactions.filter((t) => !t.category).length;
-  console.log("\npeerland starter applied=", applied.applied, "uncat left=", uncat, "rules=", rules.length);
-  assert(rules.length >= 4, "peerland starter keeps specific rules");
-  assert(applied.applied > 50, "peerland starter tags a meaningful chunk");
-  assert(applied.applied < 2000, "peerland starter does not swallow almost all rows");
+  console.log("\npeerland phase123 applied=", applied.applied, "uncat left=", uncat, "rules=", rules.length);
+  assert(rules.length >= 40, "peerland phase123 keeps curated rules");
+  assert(applied.applied > 1000, "peerland phase123 tags a large meaningful chunk");
+  assert(applied.applied < 2000, "peerland phase123 does not swallow almost all rows");
+  assert(uncat > 800, "peerland phase123 leaves long-tail for phase 4–5");
 }
 
 if (failed) {
