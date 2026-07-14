@@ -81,6 +81,9 @@ const els = {
   fileInput: document.getElementById("file-input"),
   search: document.getElementById("search-input"),
   btnClearSearch: document.getElementById("btn-clear-search"),
+  tableSearch: document.getElementById("table-search-input"),
+  btnClearTableSearch: document.getElementById("btn-clear-table-search"),
+  tableSearchHint: document.getElementById("table-search-hint"),
   dateFrom: document.getElementById("date-from"),
   dateTo: document.getElementById("date-to"),
   filterCategory: document.getElementById("filter-category"),
@@ -538,6 +541,14 @@ function getFiltered() {
   return sortTransactions(searched);
 }
 
+/** Detail table only: another smart-search layer on top of getFiltered(). */
+function getTableFiltered() {
+  const base = getFiltered();
+  const q = els.tableSearch?.value || "";
+  if (!String(q).trim()) return base;
+  return sortTransactions(smartSearch(base, q).map((r) => r.item));
+}
+
 function updateStats(visible) {
   const uncat = state.transactions.filter((t) => !t.category).length;
   const sumIn = visible.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
@@ -546,8 +557,19 @@ function updateStats(visible) {
   els.statUncat.textContent = String(uncat);
   els.statIn.textContent = formatMoney(sumIn);
   els.statOut.textContent = formatMoney(sumOut);
-  els.resultLabel.textContent = `แสดง ${visible.length.toLocaleString("th-TH")} จาก ${state.transactions.length.toLocaleString("th-TH")} รายการ`;
+  const tableQ = String(els.tableSearch?.value || "").trim();
+  const filterCount = getFiltered().length;
+  if (tableQ && visible.length !== filterCount) {
+    els.resultLabel.textContent = `ตาราง ${visible.length.toLocaleString("th-TH")} จากตัวกรอง ${filterCount.toLocaleString("th-TH")} · โปรเจกต์ ${state.transactions.length.toLocaleString("th-TH")} รายการ`;
+  } else {
+    els.resultLabel.textContent = `แสดง ${visible.length.toLocaleString("th-TH")} จาก ${state.transactions.length.toLocaleString("th-TH")} รายการ`;
+  }
   if (els.bulkCount) els.bulkCount.textContent = `เลือก ${selectedIds.size.toLocaleString("th-TH")}`;
+  if (els.tableSearchHint) {
+    els.tableSearchHint.textContent = tableQ
+      ? `ค้นหาตาราง: “${tableQ}” · ${visible.length.toLocaleString("th-TH")} แถว`
+      : "กรองอีกชั้นจากตัวกรองด้านบน";
+  }
 }
 
 function refreshCategoryOptions() {
@@ -964,11 +986,16 @@ function renderTable() {
     return;
   }
 
-  const visible = getFiltered();
+  const visible = getTableFiltered();
   const MAX = 500;
   const slice = visible.slice(0, MAX);
   updateStats(visible);
   renderGroupSummary();
+  const qHighlight =
+    String(els.tableSearch?.value || "").trim() || String(els.search?.value || "").trim();
+  if (els.btnClearTableSearch) {
+    els.btnClearTableSearch.hidden = !String(els.tableSearch?.value || "").trim();
+  }
 
   els.txBody.innerHTML = slice
     .map((t) => {
@@ -978,7 +1005,7 @@ function renderTable() {
         <td class="col-check"><input type="checkbox" data-check="${t.id}" ${checked} /></td>
         <td>${escapeHtml(formatDateTh(t.date))}${t.time ? `<div class="desc-sub">${escapeHtml(t.time)}</div>` : ""}</td>
         <td>
-          <div class="desc-main">${highlight(t.description, els.search.value)}</div>
+          <div class="desc-main">${highlight(t.description, qHighlight)}</div>
           <div class="desc-sub">${escapeHtml(t.source || "")}</div>
         </td>
         <td class="num amount-in">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
@@ -1572,6 +1599,16 @@ function wireEvents() {
     els.search.focus();
   });
 
+  ["input", "change"].forEach((evt) => {
+    els.tableSearch?.addEventListener(evt, scheduleRender);
+  });
+  els.btnClearTableSearch?.addEventListener("click", () => {
+    if (!els.tableSearch) return;
+    els.tableSearch.value = "";
+    scheduleRender();
+    els.tableSearch.focus();
+  });
+
   els.addGroupForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!requireLogin()) return;
@@ -1722,7 +1759,7 @@ function wireEvents() {
   });
 
   els.checkAll?.addEventListener("change", () => {
-    const visible = getFiltered().slice(0, 500);
+    const visible = getTableFiltered().slice(0, 500);
     if (els.checkAll.checked) visible.forEach((t) => selectedIds.add(t.id));
     else visible.forEach((t) => selectedIds.delete(t.id));
     scheduleRender();

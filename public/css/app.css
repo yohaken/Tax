@@ -206,6 +206,38 @@ body {
   border-radius: 14px;
   background: var(--card);
 }
+.table-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  margin: 0 0 0.55rem;
+}
+.table-search-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem;
+  align-items: center;
+  flex: 1 1 18rem;
+  min-width: min(100%, 18rem);
+}
+.table-search-wrap input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  color: var(--ink);
+}
+.table-search-wrap input:focus {
+  outline: 2px solid rgba(47, 93, 80, 0.22);
+  border-color: var(--accent);
+}
+.table-search-hint {
+  color: var(--mute);
+  font-size: 0.8rem;
+}
 .bulk-check {
   display: inline-flex;
   gap: 0.35rem;
