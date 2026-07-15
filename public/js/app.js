@@ -28,6 +28,7 @@ import {
   logoutFirebase,
   pullCloudState,
   pushCloudState,
+  takeRedirectError,
 } from "./firebase.js";
 import { buildLabel } from "./build.js";
 import {
@@ -3162,6 +3163,22 @@ async function setupAuth() {
       await waitAuthReady();
     } catch (err) {
       console.warn("authStateReady", err);
+    }
+
+    // Surface redirect failures (common on mobile after returning from Google).
+    const redirectErr = takeRedirectError();
+    if (redirectErr) {
+      const code = redirectErr.code || "";
+      const msg =
+        code === "auth/unauthorized-domain"
+          ? "โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Auth"
+          : code === "auth/operation-not-allowed"
+            ? "ยังไม่ได้เปิด Google Sign-in ใน Firebase"
+            : code === "auth/account-exists-with-different-credential"
+              ? "บัญชีนี้ผูกวิธีเข้าสู่ระบบอื่นไว้แล้ว"
+              : redirectErr.message || "ล็อกอินด้วย Google ไม่สำเร็จ";
+      toast(`${msg} · ${buildLabel()}`);
+      setSync("ล็อกอินไม่สำเร็จ · ลองอีกครั้ง");
     }
 
     watchAuth(async (user) => {

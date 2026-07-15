@@ -32,9 +32,15 @@ const PROJECT_DEFAULTS = {
   messagingSenderId: "470549580687",
 };
 
+/** Marks that we left this tab for Google OAuth redirect (survives return navigation). */
+const OAUTH_REDIRECT_FLAG = "taxtag-oauth-redirect";
+
 let app = null;
 export let auth = null;
 export let db = null;
+
+/** Last redirect-completion error (cleared when read). */
+let lastRedirectError = null;
 
 function isMobile() {
   return (
@@ -54,6 +60,66 @@ function sanitizeConfig(raw) {
   return out;
 }
 
+function markOAuthRedirectPending() {
+  try {
+    sessionStorage.setItem(OAUTH_REDIRECT_FLAG, String(Date.now()));
+  } catch {
+    /* private mode */
+  }
+}
+
+function clearOAuthRedirectPending() {
+  try {
+    sessionStorage.removeItem(OAUTH_REDIRECT_FLAG);
+  } catch {
+    /* private mode */
+  }
+}
+
+function wasOAuthRedirectPending() {
+  try {
+    return Boolean(sessionStorage.getItem(OAUTH_REDIRECT_FLAG));
+  } catch {
+    return false;
+  }
+}
+
+function hasFirebasePendingRedirect() {
+  try {
+    return Object.keys(sessionStorage).some((key) => key.includes("pendingRedirect"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Always finish redirect-based Google sign-in on load.
+ * Mobile Safari often returns with an empty document.referrer, so heuristics that
+ * skip getRedirectResult leave the user stuck on the login gate.
+ */
+async function completeRedirectSignIn() {
+  lastRedirectError = null;
+  const expected = wasOAuthRedirectPending() || hasFirebasePendingRedirect();
+  try {
+    const result = await getRedirectResult(auth, browserPopupRedirectResolver);
+    clearOAuthRedirectPending();
+    return result;
+  } catch (err) {
+    clearOAuthRedirectPending();
+    lastRedirectError = err;
+    console.warn("redirect result", err?.code || err?.message || err);
+    if (!expected) lastRedirectError = null;
+    return null;
+  }
+}
+
+/** Consume and clear the last redirect error for UI messaging. */
+export function takeRedirectError() {
+  const err = lastRedirectError;
+  lastRedirectError = null;
+  return err;
+}
+
 export async function initFirebase() {
   if (app && auth && db) return { auth, db };
 
@@ -66,12 +132,13 @@ export async function initFirebase() {
   }
   config = sanitizeConfig(config);
   // Keep authDomain on *.firebaseapp.com so Google OAuth redirect stays valid.
+  // Do NOT switch to *.web.app — redirect_uri_mismatch unless that handler URI is registered.
   config.authDomain = PROJECT_DEFAULTS.authDomain;
 
   app = initializeApp(config);
 
-  // Prefer getAuth (includes popup resolver). initializeAuth without resolver
-  // causes auth/argument-error on signInWithPopup.
+  // Prefer initializeAuth with popupRedirectResolver —
+  // missing resolver causes auth/argument-error on signInWithPopup.
   try {
     auth = initializeAuth(app, {
       persistence: [indexedDBLocalPersistence, browserLocalPersistence],
@@ -93,18 +160,7 @@ export async function initFirebase() {
 
   db = getFirestore(app);
 
-  // Only resolve redirect flow when we likely returned from Google OAuth —
-  // skipping this on normal loads avoids an extra auth round-trip every visit.
-  const maybeFromRedirect =
-    /[?&#](mode|apiKey|authType|oobCode)=/i.test(location.href) ||
-    /google\.com|firebaseapp\.com/i.test(String(document.referrer || ""));
-  if (maybeFromRedirect) {
-    try {
-      await getRedirectResult(auth, browserPopupRedirectResolver);
-    } catch (err) {
-      console.warn("redirect result", err?.code || err);
-    }
-  }
+  await completeRedirectSignIn();
   return { auth, db };
 }
 
@@ -122,6 +178,12 @@ export async function waitAuthReady() {
   return auth.currentUser || null;
 }
 
+async function startRedirectLogin(provider) {
+  markOAuthRedirectPending();
+  await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+  return null;
+}
+
 export async function loginWithGoogle() {
   if (!auth) await initFirebase();
   if (!auth) throw new Error("Firebase ยังไม่พร้อม");
@@ -132,9 +194,9 @@ export async function loginWithGoogle() {
 
   let result;
   try {
+    // Mobile browsers (esp. iOS Safari) block popups — use full-page redirect.
     if (isMobile()) {
-      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
-      return null;
+      return await startRedirectLogin(provider);
     }
     result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
   } catch (err) {
@@ -144,16 +206,14 @@ export async function loginWithGoogle() {
       code === "auth/popup-closed-by-user" ||
       code === "auth/cancelled-popup-request"
     ) {
-      await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
-      return null;
+      return await startRedirectLogin(provider);
     }
     if (code === "auth/argument-error") {
       // Retry the simplest supported path.
       try {
         result = await signInWithPopup(auth, new GoogleAuthProvider());
-      } catch (err2) {
-        await signInWithRedirect(auth, new GoogleAuthProvider());
-        return null;
+      } catch {
+        return await startRedirectLogin(new GoogleAuthProvider());
       }
     } else {
       throw err;
