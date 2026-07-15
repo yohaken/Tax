@@ -23,6 +23,7 @@ import {
   ALLOWED_EMAIL,
   initFirebase,
   watchAuth,
+  waitAuthReady,
   loginWithGoogle,
   logoutFirebase,
   pullCloudState,
@@ -60,6 +61,46 @@ if (!state.projectId) state.projectId = workspace.activeId;
 let currentUser = null;
 let cloudReady = false;
 let authReady = false;
+/** True while showing local workspace from a remembered session before Firebase confirms. */
+let authOptimistic = false;
+
+const AUTH_HINT_KEY = "taxtag-auth-hint";
+
+function readAuthHint() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AUTH_HINT_KEY) || "null");
+    if (!raw?.email || !raw?.uid) return null;
+    if (String(raw.email).toLowerCase() !== ALLOWED_EMAIL.toLowerCase()) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthHint(user) {
+  try {
+    if (!user?.email || !user?.uid) {
+      localStorage.removeItem(AUTH_HINT_KEY);
+      return;
+    }
+    localStorage.setItem(
+      AUTH_HINT_KEY,
+      JSON.stringify({ email: user.email, uid: user.uid, at: Date.now() })
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/** Show last session's workspace immediately — Firebase Auth already persists to IndexedDB. */
+function applyOptimisticSession() {
+  const hint = readAuthHint();
+  if (!hint) return false;
+  currentUser = { email: hint.email, uid: hint.uid };
+  authReady = true;
+  authOptimistic = true;
+  return true;
+}
 let persistTimer = null;
 let searchTimer = null;
 let rendering = false;
@@ -1870,7 +1911,7 @@ function renderTable() {
     els.empty?.classList.add("is-hidden");
     els.workspace?.classList.add("is-hidden");
     els.authTools?.classList.add("is-hidden");
-    setSync("กำลังตรวจสอบสิทธิ์…");
+    setSync(authOptimistic ? "กำลังยืนยันเซสชัน…" : "กำลังตรวจสอบสิทธิ์…");
     endRenderPass();
     return;
   }
@@ -2978,15 +3019,83 @@ function remoteTimeMs(updatedAt) {
   return Number.isFinite(t) ? t : 0;
 }
 
+async function hydrateAfterLogin(user) {
+  try {
+    setSync(`ซิงค์พื้นหลัง · ${user.email}`);
+    const remote = await pullCloudState(user.uid);
+    if (remote && Array.isArray(remote.transactions) && remote.transactions.length) {
+      const targetId = remote.projectId || remote.activeProjectId || workspace.activeId;
+      let target = workspace.projects.find((p) => p.id === targetId);
+      if (!target) {
+        target = {
+          id: targetId || makeProjectId(),
+          name: remote.projectName || remote.fileName || "โปรเจกต์คลาวด์",
+          source: remote.projectSource || "cloud",
+          fileName: remote.fileName || "",
+          updatedAt: new Date().toISOString(),
+          ...emptyProjectFields(),
+        };
+        workspace.projects.unshift(target);
+      }
+      const localCount = target.transactions?.length || 0;
+      const remoteCount = remote.transactions.length;
+      const localMs = Date.parse(target.updatedAt || "") || 0;
+      const remoteMs = remoteTimeMs(remote.updatedAt);
+      const preferRemote =
+        !localCount ||
+        remoteCount > localCount ||
+        (remoteCount === localCount && remoteMs >= localMs);
+      if (preferRemote) {
+        target.transactions = remote.transactions;
+        if (remote.categories?.length) target.categories = remote.categories;
+        if (remote.rules?.length) target.rules = remote.rules;
+        if (remote.groupNotes) target.groupNotes = remote.groupNotes;
+        if (remote.groupNicknames) target.groupNicknames = remote.groupNicknames;
+        if (remote.projectSource) target.projectSource = remote.projectSource;
+        if (remote.projectName) target.name = remote.projectName;
+        if (remote.fileName) target.fileName = remote.fileName;
+        target.updatedAt = new Date().toISOString();
+        applyProjectToState(target);
+        saveState(state, workspace);
+      } else {
+        await pushCloudState(user.uid, state, workspace);
+      }
+    } else if (state.transactions.length) {
+      await pushCloudState(user.uid, state, workspace);
+    }
+    setSync(`ซิงค์แล้ว · ${user.email}`);
+    renderProjectSelect();
+    recoverMergedImports({ silent: true });
+    renderTable();
+  } catch (err) {
+    console.warn(err);
+    setSync(`ออนไลน์ · ${user.email}`);
+  }
+  await runPendingLoads();
+  recoverMergedImports({ silent: true });
+  // Seed bundled projects in background — never block first paint
+  void ensurePeerlandProjectSeeded().catch((err) => console.warn(err));
+  void ensureTellteaProjectSeeded().catch((err) => console.warn(err));
+}
+
 async function setupAuth() {
   try {
     await initFirebase();
     cloudReady = true;
+    // Wait for IndexedDB session restore before first auth callback work
+    try {
+      await waitAuthReady();
+    } catch (err) {
+      console.warn("authStateReady", err);
+    }
+
     watchAuth(async (user) => {
       if (user && (user.email || "").toLowerCase() !== ALLOWED_EMAIL.toLowerCase()) {
         await logoutFirebase();
         currentUser = null;
+        authOptimistic = false;
         authReady = true;
+        writeAuthHint(null);
         updateAuthButton();
         setSync("อนุญาตเฉพาะบัญชีเจ้าของ");
         toast(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
@@ -2995,75 +3104,25 @@ async function setupAuth() {
       }
       currentUser = user;
       authReady = true;
+      authOptimistic = false;
+      if (user) writeAuthHint(user);
+      else writeAuthHint(null);
       updateAuthButton();
       if (!user) {
         setSync("ต้องเข้าสู่ระบบก่อน");
         renderTable();
         return;
       }
+      // Paint local workspace immediately — sync cloud afterwards
       setSync(`เข้าสู่ระบบแล้ว · ${user.email}`);
-      try {
-        const remote = await pullCloudState(user.uid);
-        if (remote && Array.isArray(remote.transactions) && remote.transactions.length) {
-          const targetId = remote.projectId || remote.activeProjectId || workspace.activeId;
-          let target = workspace.projects.find((p) => p.id === targetId);
-          if (!target) {
-            target = {
-              id: targetId || makeProjectId(),
-              name: remote.projectName || remote.fileName || "โปรเจกต์คลาวด์",
-              source: remote.projectSource || "cloud",
-              fileName: remote.fileName || "",
-              updatedAt: new Date().toISOString(),
-              ...emptyProjectFields(),
-            };
-            workspace.projects.unshift(target);
-          }
-          const localCount = target.transactions?.length || 0;
-          const remoteCount = remote.transactions.length;
-          const localMs = Date.parse(target.updatedAt || "") || 0;
-          const remoteMs = remoteTimeMs(remote.updatedAt);
-          // Prefer remote only when it has more rows, or same rows and is as new or newer.
-          // Using length alone was overwriting local group moves when counts matched.
-          const preferRemote =
-            !localCount ||
-            remoteCount > localCount ||
-            (remoteCount === localCount && remoteMs >= localMs);
-          if (preferRemote) {
-            target.transactions = remote.transactions;
-            if (remote.categories?.length) target.categories = remote.categories;
-            if (remote.rules?.length) target.rules = remote.rules;
-            if (remote.groupNotes) target.groupNotes = remote.groupNotes;
-            if (remote.groupNicknames) target.groupNicknames = remote.groupNicknames;
-            if (remote.projectSource) target.projectSource = remote.projectSource;
-            if (remote.projectName) target.name = remote.projectName;
-            if (remote.fileName) target.fileName = remote.fileName;
-            target.updatedAt = new Date().toISOString();
-            applyProjectToState(target);
-            saveState(state, workspace);
-            toast("ดึงโปรเจกต์จาก Firebase แล้ว");
-          } else {
-            await pushCloudState(user.uid, state, workspace);
-          }
-        } else if (state.transactions.length) {
-          await pushCloudState(user.uid, state, workspace);
-        }
-        setSync(`ซิงค์แล้ว · ${user.email}`);
-        renderProjectSelect();
-        recoverMergedImports({ silent: true });
-      } catch (err) {
-        console.warn(err);
-        setSync(`ล็อกอินแล้ว · ${user.email}`);
-      }
       renderTable();
-      await runPendingLoads();
-      recoverMergedImports({ silent: true });
-      await ensurePeerlandProjectSeeded();
-      await ensureTellteaProjectSeeded();
+      void hydrateAfterLogin(user);
     });
   } catch (err) {
     console.warn(err);
     cloudReady = false;
     authReady = true;
+    authOptimistic = false;
     currentUser = null;
     setSync("ล็อกอินไม่พร้อม · ตรวจ Firebase");
     renderTable();
@@ -3430,13 +3489,21 @@ function wireEvents() {
   async function handleAuthClick() {
     try {
       if (currentUser) {
+        writeAuthHint(null);
+        authOptimistic = false;
+        currentUser = null;
+        authReady = true;
+        updateAuthButton();
+        renderTable();
         await logoutFirebase();
         toast("ออกจากระบบแล้ว");
         return;
       }
       const user = await loginWithGoogle();
-      if (user) toast("เข้าสู่ระบบแล้ว · จำการล็อกอินไว้ในเครื่องนี้");
-      else toast("กำลังเปิดหน้าล็อกอิน Google…");
+      if (user) {
+        writeAuthHint(user);
+        toast("เข้าสู่ระบบแล้ว · จำเซสชันในเครื่องนี้ไว้ จะไม่ถามบ่อย");
+      } else toast("กำลังเปิดหน้าล็อกอิน Google…");
     } catch (err) {
       console.error(err);
       toast(`${err.message || "ล็อกอินไม่สำเร็จ"} · ${buildLabel()}`);
@@ -3498,6 +3565,10 @@ paintBuildStamp();
 updateUndoButton();
 updateClearButtonsChrome();
 updateColToggleChrome();
+if (applyOptimisticSession()) {
+  updateAuthButton();
+  setSync(`เซสชันค้างอยู่ · ${currentUser.email}`);
+}
 renderTable();
 setupAuth();
 

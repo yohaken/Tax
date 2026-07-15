@@ -93,10 +93,17 @@ export async function initFirebase() {
 
   db = getFirestore(app);
 
-  try {
-    await getRedirectResult(auth, browserPopupRedirectResolver);
-  } catch (err) {
-    console.warn("redirect result", err?.code || err);
+  // Only resolve redirect flow when we likely returned from Google OAuth —
+  // skipping this on normal loads avoids an extra auth round-trip every visit.
+  const maybeFromRedirect =
+    /[?&#](mode|apiKey|authType|oobCode)=/i.test(location.href) ||
+    /google\.com|firebaseapp\.com/i.test(String(document.referrer || ""));
+  if (maybeFromRedirect) {
+    try {
+      await getRedirectResult(auth, browserPopupRedirectResolver);
+    } catch (err) {
+      console.warn("redirect result", err?.code || err);
+    }
   }
   return { auth, db };
 }
@@ -104,6 +111,15 @@ export async function initFirebase() {
 export function watchAuth(callback) {
   if (!auth) throw new Error("Firebase not ready");
   return onAuthStateChanged(auth, callback);
+}
+
+/** Resolves when the first persisted auth state has been restored from IndexedDB/local. */
+export async function waitAuthReady() {
+  if (!auth) await initFirebase();
+  if (typeof auth.authStateReady === "function") {
+    await auth.authStateReady();
+  }
+  return auth.currentUser || null;
 }
 
 export async function loginWithGoogle() {
