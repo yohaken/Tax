@@ -18,26 +18,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Resolve deploy credentials
+        id: creds
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ -n "$FIREBASE_TOKEN" ]; then
+            echo "mode=token" >> "$GITHUB_OUTPUT"
+            echo "Using FIREBASE_TOKEN for deploy"
+          elif [ -n "$GCP_SA_KEY" ]; then
+            echo "mode=sa" >> "$GITHUB_OUTPUT"
+            echo "Using GCP_SA_KEY for deploy"
+          else
+            echo "mode=missing" >> "$GITHUB_OUTPUT"
+            echo "::error::Missing FIREBASE_TOKEN and GCP_SA_KEY — cannot deploy"
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (service account)
+        if: steps.creds.outputs.mode == 'sa'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: steps.creds.outputs.mode == 'sa'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Enable Firebase / create Hosting site
+        if: steps.creds.outputs.mode == 'sa'
         run: |
           gcloud config set project "$PROJECT_ID"
           gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com --project "$PROJECT_ID" || true
-          # Create Hosting site if missing (id becomes https://taxtag.web.app)
           npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
           npx firebase-tools@13 target:apply hosting taxtag "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
 
-      - name: Deploy Hosting + Firestore rules
+      - name: Deploy Hosting + Firestore rules (service account)
+        if: steps.creds.outputs.mode == 'sa'
         run: |
           npx firebase-tools@13 deploy --only hosting:taxtag,firestore:rules \
             --project "$PROJECT_ID" \
+            --non-interactive
+
+      - name: Deploy Hosting + Firestore rules (CI token)
+        if: steps.creds.outputs.mode == 'token'
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          npx firebase-tools@13 target:apply hosting taxtag "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
+          npx firebase-tools@13 deploy --only hosting:taxtag,firestore:rules \
+            --project "$PROJECT_ID" \
+            --token "$FIREBASE_TOKEN" \
             --non-interactive
 
       - name: Summary
@@ -46,4 +78,5 @@ jobs:
             echo "## TaxTag on Google"
             echo "- App: https://${SITE_ID}.web.app"
             echo "- Also: https://${SITE_ID}.firebaseapp.com"
+            echo "- Build: see public/js/build.js"
           } >> "$GITHUB_STEP_SUMMARY"
