@@ -107,4 +107,34 @@ function followFilterAfterMove(filter, prevCategories, nextCategory) {
   assert(printCols.includes("กลุ่ม") && printCols.includes("เข้า"), "keeps group/in");
 }
 
-console.log("PASS ux regressions: rename · stay · sync · rename-clear · print-cols");
+// Export group scope — only matching category rows
+{
+  function rowsForGroupStrict(base, key) {
+    const k = String(key ?? "").trim();
+    if (!k) return [];
+    if (k === "__uncat") return base.filter((t) => !String(t.category || "").trim());
+    return base.filter((t) => String(t.category || "").trim() === k);
+  }
+  const base = [
+    { category: "รายการที่ดิน", amount: 1 },
+    { category: "ขายที่ดินเปล่า", amount: 2 },
+    { category: "รายการที่ดิน", amount: 3 },
+    { category: "", amount: 4 },
+  ];
+  const land = rowsForGroupStrict(base, "รายการที่ดิน");
+  assert(land.length === 2, "Ex only that land group");
+  assert(land.every((t) => t.category === "รายการที่ดิน"), "no other groups leaked");
+  assert(rowsForGroupStrict(base, "").length === 0, "empty key exports nothing");
+}
+
+// Compact print date
+{
+  function formatDatePrint(iso) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    const be = String((y + 543) % 100).padStart(2, "0");
+    return `${d}/${m}/${be}`;
+  }
+  assert(formatDatePrint("2024-07-09") === "9/7/67", "compact BE date");
+}
+
+console.log("PASS ux regressions: rename · stay · sync · rename-clear · print-cols · export-scope · print-date");
