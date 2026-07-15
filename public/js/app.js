@@ -2811,14 +2811,14 @@ async function ensureTellteaProjectSeeded() {
     const sumOut = money
       .filter((t) => t.direction === "out")
       .reduce((s, t) => s + Number(t.amount || 0), 0);
-    // Replace incomplete / mis-parsed milk-tea data (135-page file → 3,730 money rows)
+    // Replace incomplete / mis-parsed milk-tea data (full 140-page file → 3,853 money rows)
     const needsReplace =
-      txs.length < 3000 ||
-      money.length < 3730 ||
-      Math.abs(sumIn - 7438960.28) > 1 ||
-      Math.abs(sumOut - 7341125.91) > 1 ||
+      txs.length < 3900 ||
+      money.length < 3853 ||
+      Math.abs(sumIn - 7731643.93) > 1 ||
+      Math.abs(sumOut - 7600203.91) > 1 ||
       first > "2024-01-01" ||
-      last < "2025-12-06" ||
+      last < "2025-12-31" ||
       !/telltea_2024-2025_full\.pdf/i.test(String(telltea.fileName || ""));
     if (!needsReplace) return null;
   }

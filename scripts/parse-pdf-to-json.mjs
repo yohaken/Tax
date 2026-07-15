@@ -128,10 +128,40 @@ if (previousPath && fs.existsSync(previousPath)) {
 
 const discovery = tagDiscoveryReview(txs, previous);
 txs = discovery.transactions;
+
+// Keep prior “รายการใหม่ที่ค้นเจอ” tags that still match this statement
+if (previous.length) {
+  const { DISCOVERY_REVIEW_GROUP, txFingerprint } = await import(
+    pathToFileURL(path.resolve("public/js/discovery-review.js")).href
+  );
+  const keep = new Set(
+    previous
+      .filter((t) => String(t.category || "").trim() === DISCOVERY_REVIEW_GROUP)
+      .map((t) => txFingerprint(t))
+  );
+  let kept = 0;
+  txs = txs.map((t) => {
+    if (!(Number(t.amount) > 0)) return t;
+    if (String(t.category || "").trim() === DISCOVERY_REVIEW_GROUP) return t;
+    if (!keep.has(txFingerprint(t))) return t;
+    kept += 1;
+    return {
+      ...t,
+      category: DISCOVERY_REVIEW_GROUP,
+      note: [String(t.note || "").trim(), "คงจากรอบตรวจก่อนหน้า"].filter(Boolean).join(" · "),
+      discoveryReview: true,
+      discoveryReason: "คงจากรอบตรวจก่อนหน้า",
+    };
+  });
+  discovery.keptPrior = kept;
+  discovery.tagged += kept;
+}
+
 console.log("discovery review", {
   tagged: discovery.tagged,
   brandNew: discovery.brandNew,
   dirFlip: discovery.dirFlip,
+  keptPrior: discovery.keptPrior || 0,
 });
 console.log("transactions", txs.length);
 
