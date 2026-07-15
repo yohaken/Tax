@@ -8,6 +8,7 @@
     "start": "npx --yes serve public -p 4173",
     "deploy": "npx --yes firebase-tools deploy --only hosting",
     "test:mobile-login": "node scripts/e2e-mobile-login.mjs",
+    "test:real-login": "node scripts/e2e-real-login.mjs",
     "test:redirect-gate": "node scripts/test-mobile-redirect-gate.mjs"
   },
   "engines": {

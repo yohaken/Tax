@@ -11,6 +11,7 @@ import {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
+  signInWithCustomToken,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import {
@@ -58,6 +59,15 @@ function sanitizeConfig(raw) {
     out[key] = value;
   }
   return out;
+}
+
+/**
+ * Always use the Firebase default authDomain (*.firebaseapp.com).
+ * Using taxtag.web.app here causes Google redirect_uri_mismatch — that handler URI
+ * is not registered on the OAuth client (verified via live E2E).
+ */
+export function resolveAuthDomain() {
+  return PROJECT_DEFAULTS.authDomain;
 }
 
 function markOAuthRedirectPending() {
@@ -131,9 +141,7 @@ export async function initFirebase() {
     /* non-Firebase hosting */
   }
   config = sanitizeConfig(config);
-  // Keep authDomain on *.firebaseapp.com so Google OAuth redirect stays valid.
-  // Do NOT switch to *.web.app — redirect_uri_mismatch unless that handler URI is registered.
-  config.authDomain = PROJECT_DEFAULTS.authDomain;
+  config.authDomain = resolveAuthDomain();
 
   app = initializeApp(config);
 
@@ -232,6 +240,21 @@ export async function loginWithGoogle() {
 
 export async function logoutFirebase() {
   await signOut(auth);
+}
+
+/** Test / recovery helper — exchange a Firebase custom token for a real session. */
+export async function loginWithCustomToken(token) {
+  if (!auth) await initFirebase();
+  if (!auth) throw new Error("Firebase ยังไม่พร้อม");
+  const cred = await signInWithCustomToken(auth, token);
+  const email = (cred.user?.email || "").toLowerCase();
+  if (email && email !== ALLOWED_EMAIL.toLowerCase()) {
+    await signOut(auth);
+    const denied = new Error(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
+    denied.code = "auth/email-not-allowed";
+    throw denied;
+  }
+  return cred.user;
 }
 
 function stateRef(uid) {
