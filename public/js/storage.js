@@ -551,7 +551,7 @@ export function summarizeByGroup(transactions) {
     });
 }
 
-export function exportWorkbook(transactions, { groups } = {}) {
+export function exportWorkbook(transactions, { groups, fileName, sheetDetail = "รายการ", sheetSummary = "สรุปกลุ่ม" } = {}) {
   if (!globalThis.XLSX) throw new Error("ไม่พบไลบรารี Excel");
   const rows = transactions.map((t) => ({
     วันที่: t.date,
@@ -560,7 +560,6 @@ export function exportWorkbook(transactions, { groups } = {}) {
     เงินออก: t.direction === "out" ? t.amount ?? "" : "",
     กลุ่ม: t.category || "",
     Note: t.note || "",
-    แหล่งที่มา: t.source || "",
   }));
   const summarySource = groups || summarizeByGroup(transactions);
   const summaryRows = summarySource.map((g) => ({
@@ -573,15 +572,20 @@ export function exportWorkbook(transactions, { groups } = {}) {
   }));
 
   const book = globalThis.XLSX.utils.book_new();
-  globalThis.XLSX.utils.book_append_sheet(
-    book,
-    globalThis.XLSX.utils.json_to_sheet(summaryRows),
-    "สรุปกลุ่ม"
-  );
+  if (summaryRows.length) {
+    globalThis.XLSX.utils.book_append_sheet(
+      book,
+      globalThis.XLSX.utils.json_to_sheet(summaryRows),
+      String(sheetSummary || "สรุปกลุ่ม").slice(0, 31)
+    );
+  }
   globalThis.XLSX.utils.book_append_sheet(
     book,
     globalThis.XLSX.utils.json_to_sheet(rows),
-    "รายการ"
+    String(sheetDetail || "รายการ").slice(0, 31)
   );
-  globalThis.XLSX.writeFile(book, `taxtag-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const outName =
+    fileName ||
+    `taxtag-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  globalThis.XLSX.writeFile(book, outName);
 }

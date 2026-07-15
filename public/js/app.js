@@ -1206,7 +1206,7 @@ function renderGroupSummary() {
         </td>
         <td class="group-actions">
           <button type="button" class="btn quiet tiny" data-filter-group="${escapeHtml(g.key)}" title="ดูกลุ่ม">ดู</button>
-          <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}" title="Export กลุ่มนี้">Ex</button>
+          <button type="button" class="btn quiet tiny" data-export-group="${escapeHtml(g.key)}" title="Export เฉพาะกลุ่มนี้เท่านั้น">Ex</button>
           <button type="button" class="btn quiet tiny" data-print-group="${escapeHtml(g.key)}" title="พิมพ์กลุ่มนี้">พิมพ์</button>
         </td>
       </tr>`;
@@ -1274,72 +1274,130 @@ function renderGroupSummary() {
 }
 
 function rowsForGroup(groupKey) {
+  const key = String(groupKey ?? "").trim();
   const base = getSummaryBase();
-  if (groupKey === "__uncat") return base.filter((t) => !String(t.category || "").trim());
-  return base.filter((t) => t.category === groupKey);
+  if (!key) return [];
+  if (key === "__uncat") return base.filter((t) => !String(t.category || "").trim());
+  // Strict equality only — never bleed other groups into Ex/Print
+  return base.filter((t) => String(t.category || "").trim() === key);
 }
 
 function groupTitle(groupKey) {
   return groupKey === "__uncat" ? "ยังไม่มีกลุ่ม" : groupKey;
 }
 
+function formatDatePrint(iso) {
+  if (!iso) return "—";
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m || !d) return String(iso);
+  // Compact bank-statement style: 9/7/67 (พ.ศ. สั้น)
+  const be = String((y + 543) % 100).padStart(2, "0");
+  return `${d}/${m}/${be}`;
+}
+
+function safeExportSlug(name) {
+  return String(name || "group")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 40) || "group";
+}
+
+function printMoneySlim(n) {
+  return printMoney(n);
+}
+
+function buildStatementRowsHtml(rows, { includeGroup = false } = {}) {
+  return rows
+    .map((t) => {
+      const note = String(t.note || "").trim();
+      const cat = String(t.category || "").trim();
+      return `<tr>
+        <td class="d">${escapeHtml(formatDatePrint(t.date))}${t.time ? ` ${escapeHtml(t.time)}` : ""}</td>
+        <td class="desc">${escapeHtml(t.description || "")}</td>
+        <td class="num in">${t.direction === "in" ? escapeHtml(printMoneySlim(t.amount)) : ""}</td>
+        <td class="num out">${t.direction === "out" ? escapeHtml(printMoneySlim(t.amount)) : ""}</td>
+        ${includeGroup ? `<td class="g">${escapeHtml(cat)}</td>` : ""}
+        <td class="n">${escapeHtml(note)}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function runPrint(html) {
+  if (!els.printRoot) return;
+  els.printRoot.hidden = false;
+  els.printRoot.className = "print-root print-compact";
+  els.printRoot.innerHTML = html;
+  // next frame so layout settles before print (avoids blank trailing page)
+  requestAnimationFrame(() => {
+    window.print();
+    setTimeout(() => {
+      els.printRoot.hidden = true;
+      els.printRoot.className = "print-root";
+      els.printRoot.innerHTML = "";
+    }, 400);
+  });
+}
+
 function printGroup(groupKey) {
   if (!requireLogin()) return;
-  const rows = rowsForGroup(groupKey).sort(
+  const key = String(groupKey || "").trim();
+  const rows = rowsForGroup(key).sort(
     (a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0)
   );
   if (!rows.length) {
-    toast("กลุ่มนี้ยังไม่มีรายการ");
+    toast("กลุ่มนี้ยังไม่มีรายการในช่วงที่เลือก");
     return;
   }
   const sumIn = rows.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
   const sumOut = rows.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
-  const gNote = state.groupNotes?.[groupKey] || "";
+  const gNote = String(state.groupNotes?.[key] || "").trim();
   const bounds = dataDateBounds(rows);
   const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
+  const title = groupTitle(key);
 
-  els.printRoot.hidden = false;
-  els.printRoot.innerHTML = `
-    <h1>TaxTag · ${escapeHtml(groupTitle(groupKey))}</h1>
-    <p class="print-sub">${periodLabelText()}
-      ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
-      · ${rows.length.toLocaleString("th-TH")} รายการ
-      · พิมพ์ ${escapeHtml(printedAt)}
-      <br/>เข้า ${escapeHtml(printMoney(sumIn))}
-      · ออก ${escapeHtml(printMoney(sumOut))}
-      · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}
-      ${gNote ? `<br/>Note กลุ่ม: ${escapeHtml(gNote)}` : ""}
-    </p>
-    <table>
-      <thead><tr><th>วันที่</th><th>รายละเอียด</th><th class="num">เข้า</th><th class="num">ออก</th><th>Note</th></tr></thead>
-      <tbody>
-        ${rows
-          .map(
-            (t) => `<tr>
-            <td>${escapeHtml(formatDateTh(t.date))}</td>
-            <td>${escapeHtml(t.description)}</td>
-            <td class="num">${t.direction === "in" ? escapeHtml(printMoney(t.amount)) : ""}</td>
-            <td class="num">${t.direction === "out" ? escapeHtml(printMoney(t.amount)) : ""}</td>
-            <td>${escapeHtml(t.note || "")}</td>
-          </tr>`
-          )
-          .join("")}
-      </tbody>
+  runPrint(`
+    <header class="print-head">
+      <div class="print-title">TaxTag · ${escapeHtml(title)}</div>
+      <div class="print-meta">${escapeHtml(periodLabelText())}
+        ${bounds ? ` · ${escapeHtml(formatDatePrint(bounds.from))}–${escapeHtml(formatDatePrint(bounds.to))}` : ""}
+        · ${rows.length.toLocaleString("th-TH")} รายการ
+        · พิมพ์ ${escapeHtml(printedAt)}
+        · เข้า ${escapeHtml(printMoneySlim(sumIn))}
+        · ออก ${escapeHtml(printMoneySlim(sumOut))}
+        · สุทธิ ${escapeHtml(printMoneySlim(sumIn - sumOut))}
+        ${gNote ? ` · Note: ${escapeHtml(gNote)}` : ""}
+      </div>
+    </header>
+    <table class="print-statement">
+      <thead>
+        <tr>
+          <th class="d">วันที่</th>
+          <th class="desc">รายละเอียด</th>
+          <th class="num">เข้า</th>
+          <th class="num">ออก</th>
+          <th class="n">Note</th>
+        </tr>
+      </thead>
+      <tbody>${buildStatementRowsHtml(rows, { includeGroup: false })}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2">รวม ${rows.length.toLocaleString("th-TH")} รายการ</td>
+          <td class="num">${escapeHtml(printMoneySlim(sumIn))}</td>
+          <td class="num">${escapeHtml(printMoneySlim(sumOut))}</td>
+          <td class="n">สุทธิ ${escapeHtml(printMoneySlim(sumIn - sumOut))}</td>
+        </tr>
+      </tfoot>
     </table>
-    <p class="totals">รวมเข้า ${escapeHtml(printMoney(sumIn))} · รวมออก ${escapeHtml(printMoney(sumOut))} · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}</p>
-  `;
-  window.print();
-  setTimeout(() => {
-    els.printRoot.hidden = true;
-    els.printRoot.innerHTML = "";
-  }, 300);
+  `);
 }
 
 function printVisibleTable() {
   if (!requireLogin()) return;
-  const rows = getTableFiltered().sort(
-    (a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0)
-  );
+  const rows = getTableFiltered()
+    .filter((t) => t && (t.date || t.description || t.amount))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0));
   if (!rows.length) {
     toast("ไม่มีรายการในมุมมองนี้ให้พิมพ์");
     return;
@@ -1356,62 +1414,53 @@ function printVisibleTable() {
   if (dir === "in") filterBits.push("เงินเข้า");
   if (dir === "out") filterBits.push("เงินออก");
   const tq = String(els.tableSearch?.value || "").trim();
-  if (tq) filterBits.push(`ค้นหาตาราง “${tq}”`);
-  if (hasAmountRangeFilter()) filterBits.push("กรองช่วงยอด");
-  const scope = filterBits.length ? filterBits.join(" · ") : "ทุกกลุ่มในตัวกรองปัจจุบัน";
+  if (tq) filterBits.push(`ค้นหา “${tq}”`);
+  if (hasAmountRangeFilter()) filterBits.push("ช่วงยอด");
+  const scope = filterBits.length ? filterBits.join(" · ") : "ตามตัวกรองปัจจุบัน";
 
-  els.printRoot.hidden = false;
-  els.printRoot.innerHTML = `
-    <h1>TaxTag · ตารางรายละเอียด</h1>
-    <p class="print-sub">โปรเจกต์: ${escapeHtml(state.projectName || "—")}
-      · ${escapeHtml(periodLabelText())}
-      ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
-      · ${rows.length.toLocaleString("th-TH")} รายการ
-      · พิมพ์ ${escapeHtml(printedAt)}
-      <br/>มุมมอง: ${escapeHtml(scope)}
-      <br/>เข้า ${escapeHtml(printMoney(sumIn))}
-      · ออก ${escapeHtml(printMoney(sumOut))}
-      · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}
-    </p>
-    <table>
+  runPrint(`
+    <header class="print-head">
+      <div class="print-title">TaxTag · ตารางรายละเอียด</div>
+      <div class="print-meta">${escapeHtml(state.projectName || "—")}
+        · ${escapeHtml(periodLabelText())}
+        ${bounds ? ` · ${escapeHtml(formatDatePrint(bounds.from))}–${escapeHtml(formatDatePrint(bounds.to))}` : ""}
+        · ${rows.length.toLocaleString("th-TH")} รายการ
+        · พิมพ์ ${escapeHtml(printedAt)}
+        · ${escapeHtml(scope)}
+        · เข้า ${escapeHtml(printMoneySlim(sumIn))}
+        · ออก ${escapeHtml(printMoneySlim(sumOut))}
+        · สุทธิ ${escapeHtml(printMoneySlim(sumIn - sumOut))}
+      </div>
+    </header>
+    <table class="print-statement">
       <thead>
         <tr>
-          <th>วันที่</th>
-          <th>รายละเอียด</th>
+          <th class="d">วันที่</th>
+          <th class="desc">รายละเอียด</th>
           <th class="num">เข้า</th>
           <th class="num">ออก</th>
-          <th>กลุ่ม</th>
-          <th>Note</th>
+          <th class="g">กลุ่ม</th>
+          <th class="n">Note</th>
         </tr>
       </thead>
-      <tbody>
-        ${rows
-          .map(
-            (t) => `<tr>
-            <td>${escapeHtml(formatDateTh(t.date))}${t.time ? ` ${escapeHtml(t.time)}` : ""}</td>
-            <td>${escapeHtml(t.description || "")}</td>
-            <td class="num">${t.direction === "in" ? escapeHtml(printMoney(t.amount)) : ""}</td>
-            <td class="num">${t.direction === "out" ? escapeHtml(printMoney(t.amount)) : ""}</td>
-            <td>${escapeHtml(t.category || "")}</td>
-            <td>${escapeHtml(t.note || "")}</td>
-          </tr>`
-          )
-          .join("")}
-      </tbody>
+      <tbody>${buildStatementRowsHtml(rows, { includeGroup: true })}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2">รวม ${rows.length.toLocaleString("th-TH")} รายการ</td>
+          <td class="num">${escapeHtml(printMoneySlim(sumIn))}</td>
+          <td class="num">${escapeHtml(printMoneySlim(sumOut))}</td>
+          <td colspan="2" class="n">สุทธิ ${escapeHtml(printMoneySlim(sumIn - sumOut))}</td>
+        </tr>
+      </tfoot>
     </table>
-    <p class="totals">รวมเข้า ${escapeHtml(printMoney(sumIn))} · รวมออก ${escapeHtml(printMoney(sumOut))} · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}</p>
-  `;
-  window.print();
-  setTimeout(() => {
-    els.printRoot.hidden = true;
-    els.printRoot.innerHTML = "";
-  }, 300);
+  `);
 }
 
 function printOverview() {
   if (!requireLogin()) return;
   const base = getSummaryBase();
-  const groups = sortGroups(summarizeByGroup(base));
+  // Drop empty groups so print has no blank rows / wasted page space
+  const groups = sortGroups(summarizeByGroup(base)).filter((g) => g.count > 0);
   if (!groups.length) {
     toast("ยังไม่มีรายการให้สรุป");
     return;
@@ -1420,70 +1469,90 @@ function printOverview() {
   const bounds = dataDateBounds(base);
   const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
 
-  els.printRoot.hidden = false;
-  els.printRoot.innerHTML = `
-    <h1>TaxTag · สรุปตามกลุ่ม</h1>
-    <p class="print-sub">สำหรับเสนอภาพรวมแยกกลุ่ม
-      <br/>โปรเจกต์: ${escapeHtml(state.projectName || "—")}
-      · ${escapeHtml(periodLabelText())}
-      ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
-      · ${base.length.toLocaleString("th-TH")} รายการ
-      · พิมพ์ ${escapeHtml(printedAt)}
-    </p>
-    <table>
+  runPrint(`
+    <header class="print-head">
+      <div class="print-title">TaxTag · สรุปตามกลุ่ม</div>
+      <div class="print-meta">${escapeHtml(state.projectName || "—")}
+        · ${escapeHtml(periodLabelText())}
+        ${bounds ? ` · ${escapeHtml(formatDatePrint(bounds.from))}–${escapeHtml(formatDatePrint(bounds.to))}` : ""}
+        · ${base.length.toLocaleString("th-TH")} รายการ
+        · ${groups.length.toLocaleString("th-TH")} กลุ่ม
+        · พิมพ์ ${escapeHtml(printedAt)}
+      </div>
+    </header>
+    <table class="print-statement">
       <thead>
         <tr>
-          <th>กลุ่ม</th>
+          <th class="desc">กลุ่ม</th>
           <th class="num">จำนวน</th>
-          <th class="num">เงินเข้า</th>
-          <th class="num">เงินออก</th>
+          <th class="num">เข้า</th>
+          <th class="num">ออก</th>
           <th class="num">สุทธิ</th>
-          <th>Note</th>
+          <th class="n">Note</th>
         </tr>
       </thead>
       <tbody>
         ${groups
           .map((g) => {
-            const gNote = state.groupNotes?.[g.key] || "";
+            const gNote = String(state.groupNotes?.[g.key] || "").trim();
             return `<tr>
-              <td>${escapeHtml(displayGroupName(g))}${g.name !== displayGroupName(g) ? ` <span style="color:#666">(${escapeHtml(g.name)})</span>` : ""}</td>
+              <td class="desc">${escapeHtml(displayGroupName(g))}</td>
               <td class="num">${g.count.toLocaleString("th-TH")}</td>
-              <td class="num">${escapeHtml(printMoney(g.sumIn))}</td>
-              <td class="num">${escapeHtml(printMoney(g.sumOut))}</td>
-              <td class="num">${escapeHtml(printMoney(g.net))}</td>
-              <td>${escapeHtml(gNote)}</td>
+              <td class="num">${escapeHtml(printMoneySlim(g.sumIn))}</td>
+              <td class="num">${escapeHtml(printMoneySlim(g.sumOut))}</td>
+              <td class="num">${escapeHtml(printMoneySlim(g.net))}</td>
+              <td class="n">${escapeHtml(gNote)}</td>
             </tr>`;
           })
           .join("")}
       </tbody>
       <tfoot>
         <tr>
-          <td><strong>รวมทั้งสิ้น (${groups.length.toLocaleString("th-TH")} กลุ่ม)</strong></td>
-          <td class="num"><strong>${totals.count.toLocaleString("th-TH")}</strong></td>
-          <td class="num"><strong>${escapeHtml(printMoney(totals.sumIn))}</strong></td>
-          <td class="num"><strong>${escapeHtml(printMoney(totals.sumOut))}</strong></td>
-          <td class="num"><strong>${escapeHtml(printMoney(totals.net))}</strong></td>
-          <td></td>
+          <td class="desc">รวมทั้งสิ้น</td>
+          <td class="num">${totals.count.toLocaleString("th-TH")}</td>
+          <td class="num">${escapeHtml(printMoneySlim(totals.sumIn))}</td>
+          <td class="num">${escapeHtml(printMoneySlim(totals.sumOut))}</td>
+          <td class="num">${escapeHtml(printMoneySlim(totals.net))}</td>
+          <td class="n"></td>
         </tr>
       </tfoot>
     </table>
-  `;
-  window.print();
-  setTimeout(() => {
-    els.printRoot.hidden = true;
-    els.printRoot.innerHTML = "";
-  }, 300);
+  `);
 }
 
 function exportGroup(groupKey) {
   if (!requireLogin()) return;
-  const rows = rowsForGroup(groupKey);
-  if (!rows.length) {
-    toast("กลุ่มนี้ยังไม่มีรายการ");
+  const key = String(groupKey || "").trim();
+  if (!key) {
+    toast("ไม่พบกลุ่มที่จะ Export");
     return;
   }
-  exportWorkbook(rows, { groups: summarizeByGroup(rows) });
-  toast(`Export กลุ่ม “${groupTitle(groupKey)}” · ${rows.length.toLocaleString("th-TH")} รายการ`);
+  const rows = rowsForGroup(key);
+  if (!rows.length) {
+    toast(`กลุ่ม “${groupTitle(key)}” ยังไม่มีรายการในช่วงที่เลือก`);
+    return;
+  }
+  // Safety: refuse if any row leaked outside this group
+  const leaked = rows.filter((t) =>
+    key === "__uncat"
+      ? Boolean(String(t.category || "").trim())
+      : String(t.category || "").trim() !== key
+  );
+  if (leaked.length) {
+    toast("Export ถูกยกเลิก — พบรายการนอกกลุ่ม");
+    console.warn("exportGroup leak", { key, leaked: leaked.length });
+    return;
+  }
+  const groups = summarizeByGroup(rows).filter((g) => g.key === key);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const slug = safeExportSlug(groupTitle(key));
+  exportWorkbook(rows, {
+    groups,
+    fileName: `taxtag-${slug}-${stamp}.xlsx`,
+    sheetSummary: "สรุปกลุ่มนี้",
+    sheetDetail: "รายการกลุ่มนี้",
+  });
+  toast(`Export เฉพาะกลุ่ม “${groupTitle(key)}” · ${rows.length.toLocaleString("th-TH")} รายการ`);
 }
 
 function sortMarker(key) {
@@ -2662,11 +2731,18 @@ function wireEvents() {
     }
     const printBtn = e.target.closest("[data-print-group]");
     if (printBtn) {
+      e.preventDefault();
+      e.stopPropagation();
       printGroup(printBtn.getAttribute("data-print-group"));
       return;
     }
     const exportBtn = e.target.closest("[data-export-group]");
-    if (exportBtn) exportGroup(exportBtn.getAttribute("data-export-group"));
+    if (exportBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      exportGroup(exportBtn.getAttribute("data-export-group"));
+      return;
+    }
   });
 
   els.groupList?.addEventListener("change", (e) => {
@@ -2754,7 +2830,11 @@ function wireEvents() {
       toast("ยังไม่มีข้อมูลให้ Export");
       return;
     }
-    exportWorkbook(rows, { groups: summarizeByGroup(getSummaryBase()) });
+    // Scope summary to the same rows being exported (not the whole period)
+    exportWorkbook(rows, {
+      groups: summarizeByGroup(rows),
+      fileName: `taxtag-filtered-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    });
     toast(`Export XLSX · ${rows.length.toLocaleString("th-TH")} รายการ`);
   });
 

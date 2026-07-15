@@ -603,49 +603,97 @@ body.is-row-dragging .tx-table td {
 .print-root { display: none; }
 
 @media print {
-  body * { visibility: hidden !important; }
-  .print-root, .print-root * { visibility: visible !important; }
-  .progress-popup, .toast { display: none !important; }
+  @page {
+    size: A4;
+    margin: 8mm 7mm;
+  }
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  /* Hide page chrome completely — visibility:hidden still reserved blank pages */
+  body > *:not(.print-root) {
+    display: none !important;
+  }
+  .progress-popup, .toast {
+    display: none !important;
+  }
   .print-root {
     display: block !important;
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: static !important;
+    left: auto;
+    top: auto;
     width: 100%;
-    padding: 12mm;
-    color: #000;
+    margin: 0;
+    padding: 0;
+    color: #111;
     background: #fff;
+    font-family: "IBM Plex Sans Thai", "Instrument Sans", "Sarabun", sans-serif;
   }
-  .print-root h1 {
-    font-size: 18pt;
+  .print-root.print-compact .print-head {
     margin: 0 0 4pt;
+    padding: 0 0 3pt;
+    border-bottom: 0.6pt solid #222;
   }
-  .print-root .print-sub {
-    margin: 0 0 12pt;
-    color: #444;
-    font-size: 10pt;
+  .print-root.print-compact .print-title {
+    font-size: 9pt;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    margin: 0;
+    line-height: 1.2;
   }
-  .print-root table {
+  .print-root.print-compact .print-meta {
+    margin: 1.5pt 0 0;
+    color: #333;
+    font-size: 7pt;
+    font-weight: 500;
+    line-height: 1.25;
+  }
+  .print-root.print-compact .print-statement {
     width: 100%;
     border-collapse: collapse;
-    font-size: 9pt;
+    table-layout: fixed;
+    font-size: 7.2pt;
+    line-height: 1.15;
   }
-  .print-root th,
-  .print-root td {
-    border-bottom: 1px solid #ddd;
-    padding: 4pt 3pt;
+  .print-root.print-compact .print-statement th,
+  .print-root.print-compact .print-statement td {
+    border-bottom: 0.4pt solid #ccc;
+    padding: 1.2pt 2pt;
     text-align: left;
-    vertical-align: top;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .print-root .num { text-align: right; white-space: nowrap; }
-  .print-root tfoot td {
-    border-top: 1.5pt solid #222;
+  .print-root.print-compact .print-statement th {
+    font-size: 6.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #222;
+    border-bottom: 0.7pt solid #222;
+    padding-bottom: 2pt;
+  }
+  .print-root.print-compact .print-statement .d { width: 11%; }
+  .print-root.print-compact .print-statement .desc { width: 42%; }
+  .print-root.print-compact .print-statement .g { width: 14%; }
+  .print-root.print-compact .print-statement .n { width: 16%; }
+  .print-root.print-compact .print-statement .num {
+    width: 10%;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .print-root.print-compact .print-statement tfoot td {
+    border-top: 0.8pt solid #222;
     border-bottom: 0;
-    padding-top: 6pt;
+    font-weight: 700;
+    padding-top: 2.5pt;
+    font-size: 7pt;
   }
-  .print-root .totals {
-    margin-top: 10pt;
-    font-size: 11pt;
+  .print-root.print-compact .print-statement tr {
+    page-break-inside: avoid;
   }
 }
 
