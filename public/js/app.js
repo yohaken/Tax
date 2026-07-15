@@ -215,11 +215,13 @@ const els = {
   checkAll: document.getElementById("check-all"),
   bulkCount: document.getElementById("bulk-count"),
   bulkGroup: document.getElementById("bulk-group"),
+  bulkGroupPanel: document.getElementById("bulk-group-panel"),
   bulkNote: document.getElementById("bulk-note"),
   btnClearBulkGroup: document.getElementById("btn-clear-bulk-group"),
   btnClearBulkNote: document.getElementById("btn-clear-bulk-note"),
   btnBulkApply: document.getElementById("btn-bulk-apply"),
   btnBulkClear: document.getElementById("btn-bulk-clear"),
+  groupMergePanel: document.getElementById("group-merge-panel"),
   btnClearTableZone: document.getElementById("btn-clear-table-zone"),
   btnExport: document.getElementById("btn-export"),
   btnUndo: document.getElementById("btn-undo"),
@@ -711,27 +713,21 @@ function hideProgress(delayMs = 0) {
   }
 }
 
-async function finishMoveProgress({ expectedIds, nextCategory, successLabel }) {
-  const persist = await (latestPersistPromise || Promise.resolve({ ok: true, local: true }));
+function finishMoveProgress({ expectedIds, nextCategory, successLabel }) {
+  // Verify local state immediately — never wait on cloud sync (large projects hang for ages).
   const ids = expectedIds || [];
-  let okCount = 0;
   let failCount = 0;
   for (const id of ids) {
     const tx = state.transactions.find((t) => t.id === id);
-    if (tx && String(tx.category || "") === String(nextCategory || "")) okCount += 1;
-    else failCount += 1;
+    if (!(tx && String(tx.category || "") === String(nextCategory || ""))) failCount += 1;
   }
   if (failCount > 0) {
     showProgress(`ย้ายไม่ครบ ${failCount.toLocaleString("th-TH")} รายการ — ลองอีกครั้ง`, { mode: "err" });
     hideProgress(4200);
     return false;
   }
-  if (!persist.ok && currentUser) {
-    showProgress(`${successLabel} · บันทึกในเครื่องแล้ว (คลาวด์รอซิงค์)`, { mode: "ok" });
-  } else {
-    showProgress(successLabel, { mode: "ok" });
-  }
-  hideProgress(2200);
+  showProgress(successLabel, { mode: "ok" });
+  hideProgress(1600);
   return true;
 }
 
@@ -925,16 +921,18 @@ function applyRowSelect(id, mode) {
   syncRowCheckUi(id);
 }
 
+function listGroupNames() {
+  const fromTx = state.transactions
+    .map((t) => String(t.category || "").trim())
+    .filter((c) => c && !isReservedCategoryName(c));
+  return [...new Set([...(state.categories || []), ...fromTx])].sort((a, b) =>
+    a.localeCompare(b, "th")
+  );
+}
+
 function refreshCategoryOptions() {
   const current = els.filterCategory.value;
-  const fromTx = [
-    ...new Set(
-      state.transactions
-        .map((t) => String(t.category || "").trim())
-        .filter((c) => c && !isReservedCategoryName(c))
-    ),
-  ];
-  const merged = [...new Set([...(state.categories || []), ...fromTx])];
+  const merged = listGroupNames();
   state.categories = merged;
   // Keep the active filter option even if the group was emptied / merged away,
   // so the view does not jump to another group after a move.
@@ -944,15 +942,165 @@ function refreshCategoryOptions() {
     !isReservedCategoryName(current) &&
     !merged.includes(current);
   const options = keepCurrent ? [...merged, current] : merged;
-  els.categoryDatalist.innerHTML = merged
-    .map((c) => `<option value="${escapeHtml(c)}"></option>`)
-    .join("");
+  if (els.categoryDatalist) {
+    els.categoryDatalist.innerHTML = merged
+      .map((c) => `<option value="${escapeHtml(c)}"></option>`)
+      .join("");
+  }
   els.filterCategory.innerHTML =
     `<option value="">ทุกกลุ่ม</option><option value="__uncat">ยังไม่มีกลุ่ม</option>` +
     options.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
   if ([...els.filterCategory.options].some((o) => o.value === current)) {
     els.filterCategory.value = current;
   }
+  // Refresh any open custom picker panels with latest names
+  document.querySelectorAll(".group-picker-panel:not([hidden])").forEach((panel) => {
+    const input = panel.dataset.forInput
+      ? document.getElementById(panel.dataset.forInput)
+      : panel.parentElement?.querySelector("input");
+    if (input) fillGroupPickerPanel(panel, input.value);
+  });
+}
+
+/** Fixed on-page group list (replaces browser <datalist> popup). */
+function fillGroupPickerPanel(panel, query = "") {
+  if (!panel) return;
+  const q = String(query || "").trim().toLowerCase();
+  const names = listGroupNames().filter((c) => !q || c.toLowerCase().includes(q));
+  if (!names.length) {
+    panel.innerHTML = `<div class="group-picker-opt is-empty">ยังไม่มีกลุ่ม — พิมพ์ชื่อใหม่ได้</div>`;
+    return;
+  }
+  panel.innerHTML = names
+    .map(
+      (c) =>
+        `<button type="button" class="group-picker-opt" role="option" data-group-pick="${escapeHtml(c)}">${escapeHtml(c)}</button>`
+    )
+    .join("");
+}
+
+function openGroupPicker(panel, input, { floating = false } = {}) {
+  if (!panel || !input) return;
+  fillGroupPickerPanel(panel, input.value);
+  panel.hidden = false;
+  panel.dataset.forInput = input.id || "";
+  if (floating) {
+    panel.classList.add("group-picker-floating");
+    const rect = input.getBoundingClientRect();
+    const width = Math.max(rect.width, 180);
+    let left = rect.left;
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+    let top = rect.bottom + 4;
+    const maxH = Math.min(224, window.innerHeight * 0.4);
+    if (top + maxH > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - maxH - 4);
+    }
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+    panel.style.width = `${width}px`;
+    if (!panel.isConnected || panel.parentElement !== document.body) {
+      document.body.appendChild(panel);
+    }
+  }
+}
+
+function closeGroupPicker(panel) {
+  if (!panel) return;
+  panel.hidden = true;
+  panel.classList.remove("group-picker-floating");
+  panel.style.left = "";
+  panel.style.top = "";
+  panel.style.width = "";
+}
+
+function closeAllGroupPickers() {
+  document.querySelectorAll(".group-picker-panel").forEach((p) => closeGroupPicker(p));
+}
+
+function wireGroupPickers() {
+  const bulkPanel = els.bulkGroupPanel;
+  const mergePanel = els.groupMergePanel;
+  /** Floating panel reused for table cell-cat inputs */
+  let cellPanel = document.getElementById("cell-group-panel");
+  if (!cellPanel) {
+    cellPanel = document.createElement("div");
+    cellPanel.id = "cell-group-panel";
+    cellPanel.className = "group-picker-panel group-picker-floating";
+    cellPanel.hidden = true;
+    cellPanel.setAttribute("role", "listbox");
+    cellPanel.setAttribute("aria-label", "เลือกกลุ่ม");
+    document.body.appendChild(cellPanel);
+  }
+
+  const bindStatic = (input, panel) => {
+    if (!input || !panel || input.dataset.pickerWired === "1") return;
+    input.dataset.pickerWired = "1";
+    input.setAttribute("autocomplete", "off");
+    input.removeAttribute("list");
+
+    input.addEventListener("focus", () => openGroupPicker(panel, input));
+    input.addEventListener("click", () => openGroupPicker(panel, input));
+    input.addEventListener("input", () => {
+      if (panel.hidden) openGroupPicker(panel, input);
+      else fillGroupPickerPanel(panel, input.value);
+    });
+    panel.addEventListener("mousedown", (e) => {
+      const opt = e.target.closest("[data-group-pick]");
+      if (!opt) return;
+      e.preventDefault();
+      input.value = opt.getAttribute("data-group-pick") || "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      closeGroupPicker(panel);
+      input.focus();
+    });
+  };
+
+  bindStatic(els.bulkGroup, bulkPanel);
+  bindStatic(els.groupMergeName, mergePanel);
+
+  // Table cell category: one floating panel, repositioned per focus
+  els.txBody?.addEventListener("focusin", (e) => {
+    const cat = e.target.closest?.(".cell-cat,[data-cat]");
+    if (!cat || cat.tagName !== "INPUT") return;
+    cat.removeAttribute("list");
+    openGroupPicker(cellPanel, cat, { floating: true });
+    cellPanel._boundInput = cat;
+  });
+  els.txBody?.addEventListener("input", (e) => {
+    const cat = e.target.closest?.(".cell-cat,[data-cat]");
+    if (!cat || cellPanel._boundInput !== cat) return;
+    fillGroupPickerPanel(cellPanel, cat.value);
+  });
+  cellPanel.addEventListener("mousedown", (e) => {
+    const opt = e.target.closest("[data-group-pick]");
+    if (!opt || !cellPanel._boundInput) return;
+    e.preventDefault();
+    const input = cellPanel._boundInput;
+    input.value = opt.getAttribute("data-group-pick") || "";
+    input.classList.toggle("has-value", Boolean(input.value.trim()));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    closeGroupPicker(cellPanel);
+  });
+
+  document.addEventListener("pointerdown", (e) => {
+    const t = e.target;
+    if (t.closest?.(".group-picker-panel, .group-picker, .cell-cat, [data-cat]")) return;
+    closeAllGroupPickers();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeAllGroupPickers();
+  });
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!cellPanel.hidden && cellPanel._boundInput) {
+        openGroupPicker(cellPanel, cellPanel._boundInput, { floating: true });
+      }
+    },
+    true
+  );
 }
 
 function getSummaryBase() {
@@ -1971,7 +2119,7 @@ function renderTable() {
         <td class="num amount-in" data-col="in">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
         <td class="num amount-out" data-col="out">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
         <td class="num col-amount" data-col="amount">${escapeHtml(formatMoney(t.amount || 0))}</td>
-        <td data-col="group"><input class="cell-cat${cat ? " has-value" : ""}" list="category-datalist" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="กลุ่ม…" /></td>
+        <td data-col="group"><input class="cell-cat${cat ? " has-value" : ""}" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="กลุ่ม…" autocomplete="off" autocapitalize="off" spellcheck="false" /></td>
         <td data-col="note"><input class="cell-note" data-note="${t.id}" value="${escapeHtml(t.note || "")}" placeholder="Note…" /></td>
       </tr>`;
     })
@@ -2256,13 +2404,13 @@ function applyBulk() {
     return;
   }
   let n = 0;
-  let auto = 0;
   const prevCats = [];
   const seeds = [];
   const movedIds = group ? [...selectedIds] : [];
   if (group) {
     showProgress(`กำลังย้าย ${selectedIds.size.toLocaleString("th-TH")} รายการ → “${group}”…`);
   }
+  // Move locally first — never block on auto-rule confirm / cloud sync mid-flight.
   withUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, () => {
     for (const id of selectedIds) {
       const tx = state.transactions.find((t) => t.id === id);
@@ -2276,27 +2424,33 @@ function applyBulk() {
       n += 1;
     }
     if (group && !state.categories.includes(group)) state.categories.unshift(group);
-    if (group && seeds.length) auto = learnRulesFromSeeds(seeds, group);
   });
   if (group) {
     const stay = followFilterAfterMove(prevCats, group);
-    // Drop ticks that left the current table view so re-apply doesn't feel "ค้าง"
     const stillVisible = new Set(getTableFiltered().map((t) => t.id));
     for (const id of [...selectedIds]) {
       if (!stillVisible.has(id)) selectedIds.delete(id);
     }
     schedulePersist({ immediate: true });
     scheduleRender();
-    const base =
-      auto > 0
-        ? `ใส่ให้ ${n.toLocaleString("th-TH")} ที่เลือก · ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")}`
-        : `ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`;
-    toast(stay ? `${base} · ${stay}` : base);
+    refreshCategoryOptions();
     finishMoveProgress({
       expectedIds: movedIds,
       nextCategory: group,
       successLabel: `ย้ายสำเร็จ ${n.toLocaleString("th-TH")} รายการ → “${group}”`,
     });
+    toast(stay ? `ย้ายแล้ว ${n.toLocaleString("th-TH")} รายการ · ${stay}` : `ย้ายแล้ว ${n.toLocaleString("th-TH")} รายการ`);
+    // Offer auto-tag AFTER the move finished so the busy popup never sticks on confirm().
+    if (seeds.length) {
+      queueMicrotask(() => {
+        const auto = learnRulesFromSeeds(seeds, group);
+        if (auto > 0) {
+          toast(`ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")} รายการ`);
+          schedulePersist({ immediate: true });
+          scheduleRender();
+        }
+      });
+    }
     return;
   }
   schedulePersist({ immediate: true });
@@ -3293,6 +3447,7 @@ function wireEvents() {
   els.btnClearBulkGroup?.addEventListener("click", () => {
     if (!els.bulkGroup) return;
     els.bulkGroup.value = "";
+    closeGroupPicker(els.bulkGroupPanel);
     updateClearButtonsChrome();
     els.bulkGroup.focus();
   });
@@ -3658,6 +3813,7 @@ function wireEvents() {
 }
 
 wireEvents();
+wireGroupPickers();
 paintBuildStamp();
 updateUndoButton();
 updateClearButtonsChrome();
