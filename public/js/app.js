@@ -61,13 +61,60 @@ const selectedGroupKeys = new Set();
 let mergeTargetKey = "";
 /** @type {{ mode: "on" | "off", active: boolean, touched: Set<string> } | null} */
 let rowDrag = null;
+/** @type {{ mode: "on" | "off", active: boolean, touched: Set<string> } | null} */
+let groupDrag = null;
 let tableSort = { key: "date", dir: "desc" };
 let groupSort = { key: "abs", dir: "desc" };
 let periodMode = "all"; // all | year:YYYY | custom
 let syncingPeriod = false;
+/** When true, hide empty / zero-amount groups in the summary table. */
+let onlyGroupsWithAmount = false;
+/** Detail table column visibility (persisted). */
+let txColHidden = loadTxColHidden();
+/** Detail table column widths % (persisted). */
+let txColWidths = loadTxColWidths();
 const undoStack = [];
 const MAX_UNDO = 40;
 const fieldBefore = new WeakMap();
+
+function loadTxColHidden() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("taxtag-tx-col-hidden") || "{}");
+    return {
+      amount: Boolean(raw.amount),
+      note: Boolean(raw.note),
+      group: Boolean(raw.group),
+    };
+  } catch {
+    return { amount: false, note: false, group: false };
+  }
+}
+
+function saveTxColHidden() {
+  try {
+    localStorage.setItem("taxtag-tx-col-hidden", JSON.stringify(txColHidden));
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadTxColWidths() {
+  const defaults = { date: 11, desc: 34, in: 10, out: 10, amount: 10, group: 13, note: 12 };
+  try {
+    const raw = JSON.parse(localStorage.getItem("taxtag-tx-col-widths") || "{}");
+    return { ...defaults, ...raw };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveTxColWidths() {
+  try {
+    localStorage.setItem("taxtag-tx-col-widths", JSON.stringify(txColWidths));
+  } catch {
+    /* ignore */
+  }
+}
 
 const els = {
   loginGate: document.getElementById("login-gate"),
@@ -100,10 +147,17 @@ const els = {
   periodChips: document.getElementById("period-chips"),
   periodRange: document.getElementById("period-range"),
   btnPrintOverview: document.getElementById("btn-print-overview"),
+  btnPrintSelectedGroups: document.getElementById("btn-print-selected-groups"),
+  btnGroupsWithAmount: document.getElementById("btn-groups-with-amount"),
   btnPrintTable: document.getElementById("btn-print-table"),
+  btnToggleColAmount: document.getElementById("btn-toggle-col-amount"),
+  btnToggleColNote: document.getElementById("btn-toggle-col-note"),
+  btnToggleColGroup: document.getElementById("btn-toggle-col-group"),
   printRoot: document.getElementById("print-root"),
   progressPopup: document.getElementById("progress-popup"),
   progressPopupText: document.getElementById("progress-popup-text"),
+  txTable: document.getElementById("tx-table"),
+  statScope: document.getElementById("stat-scope"),
   checkAll: document.getElementById("check-all"),
   bulkCount: document.getElementById("bulk-count"),
   bulkGroup: document.getElementById("bulk-group"),
@@ -708,14 +762,40 @@ function getTableFiltered() {
   return sortTransactions(list);
 }
 
+function getSelectedGroupTransactions() {
+  const keys = [...selectedGroupKeys].filter((k) => k && k !== "__uncat");
+  if (!keys.length) return null;
+  const keySet = new Set(keys);
+  return getSummaryBase().filter((t) => keySet.has(String(t.category || "").trim()));
+}
+
 function updateStats(visible) {
-  const uncat = state.transactions.filter((t) => !t.category).length;
-  const sumIn = visible.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
-  const sumOut = visible.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
-  els.statCount.textContent = String(state.transactions.length);
-  els.statUncat.textContent = String(uncat);
-  els.statIn.textContent = formatMoney(sumIn);
-  els.statOut.textContent = formatMoney(sumOut);
+  const selectedTxs = getSelectedGroupTransactions();
+  if (selectedTxs) {
+    const sumIn = selectedTxs.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
+    const sumOut = selectedTxs.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
+    const uncat = selectedTxs.filter((t) => !String(t.category || "").trim()).length;
+    els.statCount.textContent = String(selectedTxs.length);
+    els.statUncat.textContent = String(uncat);
+    els.statIn.textContent = formatMoney(sumIn);
+    els.statOut.textContent = formatMoney(sumOut);
+    if (els.statScope) {
+      els.statScope.hidden = false;
+      els.statScope.textContent = `จาก ${selectedGroupKeys.size.toLocaleString("th-TH")} กลุ่มที่ติ๊ก`;
+    }
+  } else {
+    const uncat = state.transactions.filter((t) => !t.category).length;
+    const sumIn = visible.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
+    const sumOut = visible.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
+    els.statCount.textContent = String(visible.length);
+    els.statUncat.textContent = String(uncat);
+    els.statIn.textContent = formatMoney(sumIn);
+    els.statOut.textContent = formatMoney(sumOut);
+    if (els.statScope) {
+      els.statScope.hidden = false;
+      els.statScope.textContent = "ตามตัวกรองตาราง / ช่วงที่เลือก";
+    }
+  }
   const tableQ = String(els.tableSearch?.value || "").trim();
   const amtOn = hasAmountRangeFilter();
   const filterCount = getFiltered().length;
@@ -731,8 +811,10 @@ function updateStats(visible) {
     if (amtOn) bits.push("กรองช่วงยอด");
     els.tableSearchHint.textContent = bits.length
       ? `${bits.join(" · ")} · ${visible.length.toLocaleString("th-TH")} แถว`
-      : "กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้";
+      : "กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้ · ลากขอบหัวคอลัมน์เพื่อขยายชื่อรายการ";
   }
+  updatePrintSelectedButton();
+  updateColToggleChrome();
 }
 
 function syncRowCheckUi(id) {
@@ -989,6 +1071,7 @@ function selectAllMergeableGroups() {
   const keys = listMergeableGroupKeys();
   keys.forEach((k) => selectedGroupKeys.add(k));
   updateGroupMergeBar();
+  bumpStatsForSelection();
   renderGroupSummary();
   toast(`เลือกแล้ว ${keys.length.toLocaleString("th-TH")} กลุ่ม`);
 }
@@ -1037,6 +1120,64 @@ function updateGroupMergeBar() {
     const allSelected = allKeys.length > 0 && allKeys.every((k) => selectedGroupKeys.has(k));
     els.btnGroupSelectAll.textContent = allSelected ? "ติ๊กออกทั้งหมด" : "เลือกทุกกลุ่ม";
     els.btnGroupSelectAll.dataset.mode = allSelected ? "clear" : "all";
+  }
+  updatePrintSelectedButton();
+}
+
+function bumpStatsForSelection() {
+  if (!state.transactions.length) return;
+  updateStats(getTableFiltered());
+}
+
+function updatePrintSelectedButton() {
+  const n = getMergeSources().length;
+  if (els.btnPrintSelectedGroups) {
+    els.btnPrintSelectedGroups.disabled = n === 0;
+    els.btnPrintSelectedGroups.textContent =
+      n > 0 ? `พิมพ์กลุ่มที่ติ๊ก (${n.toLocaleString("th-TH")})` : "พิมพ์กลุ่มที่ติ๊ก";
+  }
+  if (els.btnGroupsWithAmount) {
+    els.btnGroupsWithAmount.classList.toggle("solid", onlyGroupsWithAmount);
+    els.btnGroupsWithAmount.classList.toggle("quiet", !onlyGroupsWithAmount);
+    els.btnGroupsWithAmount.setAttribute("aria-pressed", onlyGroupsWithAmount ? "true" : "false");
+    els.btnGroupsWithAmount.textContent = onlyGroupsWithAmount
+      ? "เฉพาะกลุ่มมียอด ✓"
+      : "เฉพาะกลุ่มมียอด";
+  }
+}
+
+function updateColToggleChrome() {
+  const map = [
+    [els.btnToggleColAmount, "amount", "มูลค่า"],
+    [els.btnToggleColNote, "note", "Note"],
+    [els.btnToggleColGroup, "group", "กลุ่ม"],
+  ];
+  for (const [btn, key, label] of map) {
+    if (!btn) continue;
+    const hidden = Boolean(txColHidden[key]);
+    btn.classList.toggle("solid", hidden);
+    btn.classList.toggle("quiet", !hidden);
+    btn.textContent = hidden ? `แสดง${label}` : `ซ่อน${label}`;
+  }
+  applyTxColLayout();
+}
+
+function applyTxColLayout() {
+  const table = els.txTable;
+  if (!table) return;
+  table.classList.toggle("hide-col-amount", Boolean(txColHidden.amount));
+  table.classList.toggle("hide-col-note", Boolean(txColHidden.note));
+  table.classList.toggle("hide-col-group", Boolean(txColHidden.group));
+  const visibleKeys = ["date", "desc", "in", "out", "amount", "group", "note"].filter(
+    (k) => !(k === "amount" && txColHidden.amount) && !(k === "note" && txColHidden.note) && !(k === "group" && txColHidden.group)
+  );
+  const sum = visibleKeys.reduce((s, k) => s + (Number(txColWidths[k]) || 10), 0) || 1;
+  for (const k of visibleKeys) {
+    const pct = (((Number(txColWidths[k]) || 10) / sum) * 100).toFixed(2);
+    table.querySelectorAll(`[data-col="${k}"]`).forEach((el) => {
+      if (el.tagName === "COL") el.style.width = `${pct}%`;
+      else el.style.width = `${pct}%`;
+    });
   }
 }
 
@@ -1131,11 +1272,16 @@ function renderGroupSummary() {
   renderPeriodChips();
   const base = getSummaryBase();
   updatePeriodRangeLabel(base);
-  const groups = sortGroups(summarizeByGroup(base));
+  let groups = sortGroups(summarizeByGroup(base));
+  if (onlyGroupsWithAmount) {
+    groups = groups.filter((g) => (g.sumIn || 0) + (g.sumOut || 0) > 0);
+  }
   const active = els.filterCategory.value || "";
 
   if (!groups.length) {
-    els.groupList.innerHTML = `<div class="group-meta">ยังไม่มีรายการให้สรุปในช่วงนี้</div>`;
+    els.groupList.innerHTML = `<div class="group-meta">${
+      onlyGroupsWithAmount ? "ไม่มีกลุ่มมียอดในช่วงนี้" : "ยังไม่มีรายการให้สรุปในช่วงนี้"
+    }</div>`;
     updateGroupMergeBar();
     return;
   }
@@ -1147,7 +1293,9 @@ function renderGroupSummary() {
         <th class="col-check">
           <input type="checkbox" id="group-check-all" title="เลือก/ติ๊กออกทุกกลุ่ม" ${
             (() => {
-              const keys = listMergeableGroupKeys();
+              const keys = listMergeableGroupKeys().filter((k) =>
+                onlyGroupsWithAmount ? groups.some((g) => g.key === k) : true
+              );
               return keys.length && keys.every((k) => selectedGroupKeys.has(k)) ? "checked" : "";
             })()
           } />
@@ -1214,7 +1362,9 @@ function renderGroupSummary() {
     .join("");
 
   const used = new Set(groups.map((g) => g.key));
-  const emptyCats = (state.categories || []).filter((c) => c && !used.has(c) && !isReservedCategoryName(c));
+  const emptyCats = onlyGroupsWithAmount
+    ? []
+    : (state.categories || []).filter((c) => c && !used.has(c) && !isReservedCategoryName(c));
   const emptyBody = emptyCats
     .map((c) => {
       const checked = selectedGroupKeys.has(c) ? "checked" : "";
@@ -1259,17 +1409,21 @@ function renderGroupSummary() {
     </tr>
   </tfoot>`;
 
-  els.groupList.innerHTML = `<table class="group-table">${head}<tbody>${body}${emptyBody}</tbody>${foot}</table>`;
+  els.groupList.innerHTML = `<table class="group-table" id="group-table">${head}<tbody>${body}${emptyBody}</tbody>${foot}</table>`;
 
   const checkAll = els.groupList.querySelector("#group-check-all");
   checkAll?.addEventListener("change", () => {
-    const keys = listMergeableGroupKeys();
+    const keys = listMergeableGroupKeys().filter((k) =>
+      onlyGroupsWithAmount ? groups.some((g) => g.key === k) : true
+    );
     if (checkAll.checked) keys.forEach((k) => selectedGroupKeys.add(k));
     else keys.forEach((k) => selectedGroupKeys.delete(k));
     updateGroupMergeBar();
+    bumpStatsForSelection();
     renderGroupSummary();
   });
 
+  wireGroupRowDragSelect();
   updateGroupMergeBar();
 }
 
@@ -1460,7 +1614,10 @@ function printOverview() {
   if (!requireLogin()) return;
   const base = getSummaryBase();
   // Drop empty groups so print has no blank rows / wasted page space
-  const groups = sortGroups(summarizeByGroup(base)).filter((g) => g.count > 0);
+  let groups = sortGroups(summarizeByGroup(base)).filter((g) => g.count > 0);
+  if (onlyGroupsWithAmount) {
+    groups = groups.filter((g) => (g.sumIn || 0) + (g.sumOut || 0) > 0);
+  }
   if (!groups.length) {
     toast("ยังไม่มีรายการให้สรุป");
     return;
@@ -1480,10 +1637,10 @@ function printOverview() {
         · พิมพ์ ${escapeHtml(printedAt)}
       </div>
     </header>
-    <table class="print-statement">
+    <table class="print-statement print-overview">
       <thead>
         <tr>
-          <th class="desc">กลุ่ม</th>
+          <th class="gname">กลุ่ม</th>
           <th class="num">จำนวน</th>
           <th class="num">เข้า</th>
           <th class="num">ออก</th>
@@ -1496,7 +1653,7 @@ function printOverview() {
           .map((g) => {
             const gNote = String(state.groupNotes?.[g.key] || "").trim();
             return `<tr>
-              <td class="desc">${escapeHtml(displayGroupName(g))}</td>
+              <td class="gname" title="${escapeHtml(displayGroupName(g))}">${escapeHtml(displayGroupName(g))}</td>
               <td class="num">${g.count.toLocaleString("th-TH")}</td>
               <td class="num">${escapeHtml(printMoneySlim(g.sumIn))}</td>
               <td class="num">${escapeHtml(printMoneySlim(g.sumOut))}</td>
@@ -1508,7 +1665,7 @@ function printOverview() {
       </tbody>
       <tfoot>
         <tr>
-          <td class="desc">รวมทั้งสิ้น</td>
+          <td class="gname">รวมทั้งสิ้น</td>
           <td class="num">${totals.count.toLocaleString("th-TH")}</td>
           <td class="num">${escapeHtml(printMoneySlim(totals.sumIn))}</td>
           <td class="num">${escapeHtml(printMoneySlim(totals.sumOut))}</td>
@@ -1516,6 +1673,99 @@ function printOverview() {
           <td class="n"></td>
         </tr>
       </tfoot>
+    </table>
+  `);
+}
+
+function printSelectedGroups() {
+  if (!requireLogin()) return;
+  const keys = getMergeSources();
+  if (!keys.length) {
+    toast("ติ๊กกลุ่มที่ต้องการพิมพ์ก่อน");
+    return;
+  }
+  const keySet = new Set(keys);
+  const base = getSummaryBase();
+  const groups = sortGroups(summarizeByGroup(base)).filter((g) => keySet.has(g.key) && g.count > 0);
+  if (!groups.length) {
+    toast("กลุ่มที่ติ๊กยังไม่มีรายการในช่วงนี้");
+    return;
+  }
+  const rows = base
+    .filter((t) => keySet.has(String(t.category || "").trim()))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0));
+  const totals = groupTotals(groups);
+  const sumIn = rows.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
+  const sumOut = rows.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
+  const bounds = dataDateBounds(rows);
+  const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
+  const names = groups.map((g) => displayGroupName(g)).join(", ");
+
+  // One print job: selected groups summary + combined slim statement rows
+  runPrint(`
+    <header class="print-head">
+      <div class="print-title">TaxTag · พิมพ์กลุ่มที่ติ๊ก (${groups.length.toLocaleString("th-TH")})</div>
+      <div class="print-meta">${escapeHtml(state.projectName || "—")}
+        · ${escapeHtml(periodLabelText())}
+        ${bounds ? ` · ${escapeHtml(formatDatePrint(bounds.from))}–${escapeHtml(formatDatePrint(bounds.to))}` : ""}
+        · ${rows.length.toLocaleString("th-TH")} รายการ
+        · พิมพ์ ${escapeHtml(printedAt)}
+        · เข้า ${escapeHtml(printMoneySlim(sumIn))}
+        · ออก ${escapeHtml(printMoneySlim(sumOut))}
+        · สุทธิ ${escapeHtml(printMoneySlim(sumIn - sumOut))}
+      </div>
+      <div class="print-meta">กลุ่ม: ${escapeHtml(names)}</div>
+    </header>
+    <table class="print-statement print-overview">
+      <thead>
+        <tr>
+          <th class="gname">กลุ่ม</th>
+          <th class="num">จำนวน</th>
+          <th class="num">เข้า</th>
+          <th class="num">ออก</th>
+          <th class="num">สุทธิ</th>
+          <th class="n">Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${groups
+          .map((g) => {
+            const gNote = String(state.groupNotes?.[g.key] || "").trim();
+            return `<tr>
+              <td class="gname">${escapeHtml(displayGroupName(g))}</td>
+              <td class="num">${g.count.toLocaleString("th-TH")}</td>
+              <td class="num">${escapeHtml(printMoneySlim(g.sumIn))}</td>
+              <td class="num">${escapeHtml(printMoneySlim(g.sumOut))}</td>
+              <td class="num">${escapeHtml(printMoneySlim(g.net))}</td>
+              <td class="n">${escapeHtml(gNote)}</td>
+            </tr>`;
+          })
+          .join("")}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="gname">รวมที่ติ๊ก</td>
+          <td class="num">${totals.count.toLocaleString("th-TH")}</td>
+          <td class="num">${escapeHtml(printMoneySlim(totals.sumIn))}</td>
+          <td class="num">${escapeHtml(printMoneySlim(totals.sumOut))}</td>
+          <td class="num">${escapeHtml(printMoneySlim(totals.net))}</td>
+          <td class="n"></td>
+        </tr>
+      </tfoot>
+    </table>
+    <div class="print-meta" style="margin:6pt 0 2pt">รายละเอียดรวม · ${rows.length.toLocaleString("th-TH")} รายการ</div>
+    <table class="print-statement">
+      <thead>
+        <tr>
+          <th class="d">วันที่</th>
+          <th class="desc">รายละเอียด</th>
+          <th class="num">เข้า</th>
+          <th class="num">ออก</th>
+          <th class="g">กลุ่ม</th>
+          <th class="n">Note</th>
+        </tr>
+      </thead>
+      <tbody>${buildStatementRowsHtml(rows, { includeGroup: true })}</tbody>
     </table>
   `);
 }
@@ -1642,16 +1892,19 @@ function renderTable() {
       const srcTitle = t.source ? ` title="${escapeHtml(t.source)}"` : "";
       return `<tr data-id="${t.id}" class="${selectedIds.has(t.id) ? "is-selected" : ""}">
         <td class="col-check"><input type="checkbox" data-check="${t.id}" ${checked} /></td>
-        <td class="col-date">${when}</td>
-        <td class="col-desc"${srcTitle}><span class="desc-main">${highlight(t.description, qHighlight)}</span></td>
-        <td class="num amount-in">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
-        <td class="num amount-out">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
-        <td class="num col-amount">${escapeHtml(formatMoney(t.amount || 0))}</td>
-        <td><input class="cell-cat${cat ? " has-value" : ""}" list="category-datalist" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="กลุ่ม…" /></td>
-        <td><input class="cell-note" data-note="${t.id}" value="${escapeHtml(t.note || "")}" placeholder="Note…" /></td>
+        <td class="col-date" data-col="date">${when}</td>
+        <td class="col-desc" data-col="desc"${srcTitle}><span class="desc-main">${highlight(t.description, qHighlight)}</span></td>
+        <td class="num amount-in" data-col="in">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
+        <td class="num amount-out" data-col="out">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
+        <td class="num col-amount" data-col="amount">${escapeHtml(formatMoney(t.amount || 0))}</td>
+        <td data-col="group"><input class="cell-cat${cat ? " has-value" : ""}" list="category-datalist" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="กลุ่ม…" /></td>
+        <td data-col="note"><input class="cell-note" data-note="${t.id}" value="${escapeHtml(t.note || "")}" placeholder="Note…" /></td>
       </tr>`;
     })
     .join("");
+
+  applyTxColLayout();
+  wireTxColumnResize();
 
   if (els.checkAll) {
     els.checkAll.checked = visible.length > 0 && visible.every((t) => selectedIds.has(t.id));
@@ -1724,6 +1977,120 @@ function wireTableRowDragSelect() {
   window.addEventListener("blur", endDrag);
   body.addEventListener("dragstart", (e) => {
     if (rowDrag?.active) e.preventDefault();
+  });
+}
+
+function applyGroupSelect(key, mode) {
+  if (!key || key === "__uncat" || isReservedCategoryName(key)) return;
+  if (mode === "on") selectedGroupKeys.add(key);
+  else selectedGroupKeys.delete(key);
+  const row = [...(els.groupList?.querySelectorAll("tr[data-group]") || [])].find(
+    (r) => r.getAttribute("data-group") === key
+  );
+  if (!row) return;
+  const check = row.querySelector("[data-group-check]");
+  if (check) check.checked = selectedGroupKeys.has(key);
+  row.classList.toggle("is-merge-picked", selectedGroupKeys.has(key));
+}
+
+function wireGroupRowDragSelect() {
+  const wrap = els.groupList;
+  if (!wrap || wrap.dataset.dragWired === "1") return;
+  wrap.dataset.dragWired = "1";
+
+  const endDrag = () => {
+    if (!groupDrag?.active) return;
+    groupDrag = null;
+    document.body.classList.remove("is-group-dragging");
+    updateGroupMergeBar();
+    bumpStatsForSelection();
+  };
+
+  wrap.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("input:not([data-group-check]), textarea, button, a, .group-note, .rename-form")) {
+      return;
+    }
+    const row = e.target.closest("tr[data-group]");
+    if (!row || row.classList.contains("group-total-row")) return;
+    const key = row.getAttribute("data-group");
+    if (!key || key === "__uncat") return;
+
+    const onCheck = e.target.closest("[data-group-check]");
+    const currentlyOn = selectedGroupKeys.has(key);
+    const mode = currentlyOn ? "off" : "on";
+    e.preventDefault();
+
+    groupDrag = { mode, active: true, touched: new Set([key]) };
+    document.body.classList.add("is-group-dragging");
+    applyGroupSelect(key, mode);
+    updateGroupMergeBar();
+    bumpStatsForSelection();
+    if (onCheck) {
+      // prevent native toggle from fighting mode
+      const check = onCheck;
+      queueMicrotask(() => {
+        check.checked = selectedGroupKeys.has(key);
+      });
+    }
+  });
+
+  wrap.addEventListener("mouseover", (e) => {
+    if (!groupDrag?.active) return;
+    const row = e.target.closest("tr[data-group]");
+    if (!row) return;
+    const key = row.getAttribute("data-group");
+    if (!key || key === "__uncat" || groupDrag.touched.has(key)) return;
+    groupDrag.touched.add(key);
+    applyGroupSelect(key, groupDrag.mode);
+  });
+
+  window.addEventListener("mouseup", endDrag);
+  window.addEventListener("blur", endDrag);
+  wrap.addEventListener("dragstart", (e) => {
+    if (groupDrag?.active) e.preventDefault();
+  });
+}
+
+function wireTxColumnResize() {
+  const table = els.txTable;
+  if (!table || table.dataset.resizeWired === "1") return;
+  table.dataset.resizeWired = "1";
+
+  let drag = null;
+  table.addEventListener("mousedown", (e) => {
+    const handle = e.target.closest("[data-resize]");
+    if (!handle) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const key = handle.getAttribute("data-resize");
+    if (!key) return;
+    drag = {
+      key,
+      startX: e.clientX,
+      startW: Number(txColWidths[key]) || 10,
+    };
+    document.body.classList.add("is-col-resizing");
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const tableW = table.getBoundingClientRect().width || 800;
+    const deltaPct = (dx / tableW) * 100;
+    txColWidths[drag.key] = Math.max(6, Math.min(55, drag.startW + deltaPct));
+    // Prefer expanding description when shrinking others
+    if (drag.key !== "desc" && deltaPct < 0) {
+      txColWidths.desc = Math.min(55, (Number(txColWidths.desc) || 30) + Math.abs(deltaPct) * 0.6);
+    }
+    applyTxColLayout();
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!drag) return;
+    drag = null;
+    document.body.classList.remove("is-col-resizing");
+    saveTxColWidths();
   });
 }
 
@@ -2531,6 +2898,15 @@ function wireEvents() {
   els.btnPrintOverview?.addEventListener("click", printOverview);
   els.btnPrintTable?.addEventListener("click", printVisibleTable);
 
+  const toggleCol = (key) => {
+    txColHidden[key] = !txColHidden[key];
+    saveTxColHidden();
+    updateColToggleChrome();
+  };
+  els.btnToggleColAmount?.addEventListener("click", () => toggleCol("amount"));
+  els.btnToggleColNote?.addEventListener("click", () => toggleCol("note"));
+  els.btnToggleColGroup?.addEventListener("click", () => toggleCol("group"));
+
   els.btnClearSearch?.addEventListener("click", () => {
     els.search.value = "";
     scheduleRender();
@@ -2753,6 +3129,7 @@ function wireEvents() {
       if (check.checked) selectedGroupKeys.add(key);
       else selectedGroupKeys.delete(key);
       updateGroupMergeBar();
+      bumpStatsForSelection();
       const row = check.closest("tr");
       if (row) row.classList.toggle("is-merge-picked", check.checked);
       return;
@@ -2865,6 +3242,7 @@ function wireEvents() {
     selectedGroupKeys.clear();
     clearMergeTarget();
     updateGroupMergeBar();
+    bumpStatsForSelection();
     renderGroupSummary();
   });
   els.btnGroupMergeClearTarget?.addEventListener("click", () => {
@@ -2877,11 +3255,19 @@ function wireEvents() {
     if (mode === "clear") {
       selectedGroupKeys.clear();
       updateGroupMergeBar();
+      bumpStatsForSelection();
       renderGroupSummary();
       return;
     }
     selectAllMergeableGroups();
   });
+  els.btnGroupsWithAmount?.addEventListener("click", () => {
+    onlyGroupsWithAmount = !onlyGroupsWithAmount;
+    updatePrintSelectedButton();
+    renderGroupSummary();
+    toast(onlyGroupsWithAmount ? "แสดงเฉพาะกลุ่มมียอด" : "แสดงทุกกลุ่ม");
+  });
+  els.btnPrintSelectedGroups?.addEventListener("click", printSelectedGroups);
   els.groupMergeName?.addEventListener("input", () => {
     if (mergeTargetKey) return;
     updateGroupMergeBar();
@@ -2898,6 +3284,7 @@ wireEvents();
 paintBuildStamp();
 updateUndoButton();
 updateClearButtonsChrome();
+updateColToggleChrome();
 renderTable();
 setupAuth();
 

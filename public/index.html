@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=39" />
+  <link rel="stylesheet" href="css/app.css?v=40" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -91,6 +91,7 @@
       </form>
 
       <div class="stats" id="stat-grid">
+        <span class="stat-scope" id="stat-scope">ตามตัวกรองตาราง / ช่วงที่เลือก</span>
         <span><em id="stat-count">0</em> รายการ</span>
         <span>ยังไม่ติดกลุ่ม <em id="stat-uncat">0</em></span>
         <span class="in">เข้า <em id="stat-in">฿0</em></span>
@@ -114,12 +115,14 @@
           </div>
           <div class="group-summary-actions">
             <button type="button" class="btn solid tiny" id="btn-peerland-phases" hidden title="จัดกลุ่มอัตโนมัติเฟส 1–5">จัดกลุ่มเฟส 1–5</button>
-            <button type="button" class="btn solid tiny" id="btn-print-overview" title="พิมพ์ตารางสรุปสำหรับเสนอภาพรวม">พิมพ์สรุปทุกกลุ่ม</button>
+            <button type="button" class="btn quiet tiny" id="btn-groups-with-amount" aria-pressed="false" title="ซ่อนกลุ่มที่ยอดเข้า/ออกเป็น 0">เฉพาะกลุ่มมียอด</button>
+            <button type="button" class="btn solid tiny" id="btn-print-overview" title="พิมพ์ตารางสรุปทุกกลุ่ม">พิมพ์สรุปทุกกลุ่ม</button>
+            <button type="button" class="btn solid tiny" id="btn-print-selected-groups" disabled title="พิมพ์เฉพาะกลุ่มที่ติ๊ก รวมครั้งเดียว">พิมพ์กลุ่มที่ติ๊ก</button>
           </div>
         </div>
         <div class="group-merge-bar" id="group-merge-bar" hidden>
           <button type="button" class="btn quiet tiny" id="btn-group-select-all">เลือกทุกกลุ่ม</button>
-          <span class="group-merge-count" id="group-merge-count">ยังไม่ได้ติ๊กกลุ่มต้นทาง</span>
+          <span class="group-merge-count" id="group-merge-count">ยังไม่ได้ติ๊กกลุ่มต้นทาง · ลากเมาส์เลือกหลายแถวได้</span>
           <span class="group-merge-target" id="group-merge-target-label" hidden></span>
           <button type="button" class="btn quiet tiny" id="btn-group-merge-clear-target" hidden title="ยกเลิกปลายทาง">เคลียร์ปลายทาง</button>
           <input id="group-merge-name" type="text" maxlength="60" list="category-datalist" placeholder="พิมพ์ชื่อกลุ่มใหม่ หรือคลิก “รวมเข้าที่นี่”" autocomplete="off" />
@@ -182,21 +185,57 @@
           <button type="button" class="btn quiet tiny" id="btn-clear-amount-filters" title="ล้างตัวกรองยอด">ล้างยอด</button>
           <button type="button" class="btn quiet tiny" id="btn-clear-table-zone" title="เคลียร์ค้นหาตาราง · ช่วงยอด · ช่องกลุ่ม/Note ในแถบนี้">เคลียร์ทุกค่า</button>
         </div>
-        <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้ · พิมพ์ไม่โชว์ชื่อไฟล์และคอลัมน์มูลค่า</span>
+        <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้ · ลากขอบหัวคอลัมน์เพื่อขยายชื่อรายการ</span>
+        <div class="col-tools" id="col-tools" aria-label="คอลัมน์ตาราง">
+          <button type="button" class="btn quiet tiny" id="btn-toggle-col-amount" title="ซ่อน/แสดงคอลัมน์มูลค่า">ซ่อนมูลค่า</button>
+          <button type="button" class="btn quiet tiny" id="btn-toggle-col-group" title="ซ่อน/แสดงคอลัมน์กลุ่ม">ซ่อนกลุ่ม</button>
+          <button type="button" class="btn quiet tiny" id="btn-toggle-col-note" title="ซ่อน/แสดงคอลัมน์ Note">ซ่อน Note</button>
+        </div>
       </div>
 
       <div class="table-scroll">
         <table class="tx-table" id="tx-table">
+          <colgroup>
+            <col class="col-check" style="width:2.2rem" />
+            <col data-col="date" />
+            <col data-col="desc" />
+            <col data-col="in" />
+            <col data-col="out" />
+            <col data-col="amount" />
+            <col data-col="group" />
+            <col data-col="note" />
+          </colgroup>
           <thead>
             <tr>
               <th class="col-check"></th>
-              <th><button type="button" class="th-sort" data-sort="date">วันที่</button></th>
-              <th><button type="button" class="th-sort" data-sort="desc">รายละเอียด</button></th>
-              <th class="num"><button type="button" class="th-sort" data-sort="in">เข้า</button></th>
-              <th class="num"><button type="button" class="th-sort" data-sort="out">ออก</button></th>
-              <th class="num"><button type="button" class="th-sort" data-sort="amount">มูลค่า</button></th>
-              <th><button type="button" class="th-sort" data-sort="group">กลุ่ม</button></th>
-              <th><button type="button" class="th-sort" data-sort="note">Note</button></th>
+              <th data-col="date" class="th-resize">
+                <button type="button" class="th-sort" data-sort="date">วันที่</button>
+                <span class="col-resizer" data-resize="date" title="ลากปรับความกว้าง"></span>
+              </th>
+              <th data-col="desc" class="th-resize">
+                <button type="button" class="th-sort" data-sort="desc">รายละเอียด</button>
+                <span class="col-resizer" data-resize="desc" title="ลากปรับความกว้าง"></span>
+              </th>
+              <th data-col="in" class="num th-resize">
+                <button type="button" class="th-sort" data-sort="in">เข้า</button>
+                <span class="col-resizer" data-resize="in" title="ลากปรับความกว้าง"></span>
+              </th>
+              <th data-col="out" class="num th-resize">
+                <button type="button" class="th-sort" data-sort="out">ออก</button>
+                <span class="col-resizer" data-resize="out" title="ลากปรับความกว้าง"></span>
+              </th>
+              <th data-col="amount" class="num th-resize">
+                <button type="button" class="th-sort" data-sort="amount">มูลค่า</button>
+                <span class="col-resizer" data-resize="amount" title="ลากปรับความกว้าง"></span>
+              </th>
+              <th data-col="group" class="th-resize">
+                <button type="button" class="th-sort" data-sort="group">กลุ่ม</button>
+                <span class="col-resizer" data-resize="group" title="ลากปรับความกว้าง"></span>
+              </th>
+              <th data-col="note" class="th-resize">
+                <button type="button" class="th-sort" data-sort="note">Note</button>
+                <span class="col-resizer" data-resize="note" title="ลากปรับความกว้าง"></span>
+              </th>
             </tr>
           </thead>
           <tbody id="tx-body"></tbody>
@@ -216,6 +255,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
-  <script type="module" src="js/app.js?v=39"></script>
+  <script type="module" src="js/app.js?v=40"></script>
 </body>
 </html>

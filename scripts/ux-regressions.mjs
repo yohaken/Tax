@@ -137,4 +137,20 @@ function followFilterAfterMove(filter, prevCategories, nextCategory) {
   assert(formatDatePrint("2024-07-09") === "9/7/67", "compact BE date");
 }
 
-console.log("PASS ux regressions: rename · stay · sync · rename-clear · print-cols · export-scope · print-date");
+// Selected-group stats scope
+{
+  const selected = new Set(["A", "B"]);
+  const txs = [
+    { category: "A", direction: "in", amount: 100 },
+    { category: "B", direction: "out", amount: 40 },
+    { category: "C", direction: "in", amount: 999 },
+  ];
+  const scoped = txs.filter((t) => selected.has(t.category));
+  const sumIn = scoped.filter((t) => t.direction === "in").reduce((s, t) => s + t.amount, 0);
+  const sumOut = scoped.filter((t) => t.direction === "out").reduce((s, t) => s + t.amount, 0);
+  assert(scoped.length === 2, "stats uses selected groups only");
+  assert(sumIn === 100 && sumOut === 40, "in/out from selected groups");
+}
+
+console.log("PASS ux regressions: rename · stay · sync · print · export-scope · selected-stats");
+
