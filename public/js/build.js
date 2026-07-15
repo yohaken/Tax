@@ -1,7 +1,7 @@
 /** Bump version + builtAt on every UI/JS ship so users can verify the live build. */
 export const APP_BUILD = {
-  version: 37,
-  builtAt: "2026-07-15 04:17",
+  version: 38,
+  builtAt: "2026-07-15 10:42",
   tz: "+07",
 };
 

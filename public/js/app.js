@@ -100,7 +100,10 @@ const els = {
   periodChips: document.getElementById("period-chips"),
   periodRange: document.getElementById("period-range"),
   btnPrintOverview: document.getElementById("btn-print-overview"),
+  btnPrintTable: document.getElementById("btn-print-table"),
   printRoot: document.getElementById("print-root"),
+  progressPopup: document.getElementById("progress-popup"),
+  progressPopupText: document.getElementById("progress-popup-text"),
   checkAll: document.getElementById("check-all"),
   bulkCount: document.getElementById("bulk-count"),
   bulkGroup: document.getElementById("bulk-group"),
@@ -524,33 +527,84 @@ function highlight(text, query) {
 }
 
 let persistGen = 0;
+/** @type {Promise<{ ok: boolean, cloud?: boolean, local?: boolean }> | null} */
+let latestPersistPromise = null;
 
 function schedulePersist({ cloud = true, immediate = false } = {}) {
   saveState(state, workspace);
   setSync(currentUser ? "บันทึกในเครื่องแล้ว · กำลังซิงค์…" : "บันทึกอัตโนมัติ");
   clearTimeout(persistTimer);
   const gen = ++persistGen;
-  const run = async () => {
-    if (!cloud || !currentUser || !cloudReady) {
-      if (gen === persistGen) {
-        setSync(currentUser ? `ออนไลน์ · ${currentUser.email}` : "บันทึกอัตโนมัติในเครื่อง");
+  const promise = new Promise((resolve) => {
+    const run = async () => {
+      if (!cloud || !currentUser || !cloudReady) {
+        if (gen === persistGen) {
+          setSync(currentUser ? `ออนไลน์ · ${currentUser.email}` : "บันทึกอัตโนมัติในเครื่อง");
+        }
+        resolve({ ok: true, local: true });
+        return;
       }
-      return;
-    }
-    try {
-      await pushCloudState(currentUser.uid, state, workspace);
-      if (gen === persistGen) setSync(`ซิงค์แล้ว · ${currentUser.email}`);
-    } catch (err) {
-      console.warn(err);
-      if (gen === persistGen) setSync("บันทึกในเครื่องแล้ว (คลาวด์ยังไม่พร้อม)");
-    }
-  };
-  // Group moves / renames: flush local+cloud promptly so UI doesn’t feel “ไม่ได้ย้าย”
-  if (immediate) {
-    persistTimer = setTimeout(run, 0);
+      try {
+        await pushCloudState(currentUser.uid, state, workspace);
+        if (gen === persistGen) setSync(`ซิงค์แล้ว · ${currentUser.email}`);
+        resolve({ ok: true, cloud: true });
+      } catch (err) {
+        console.warn(err);
+        if (gen === persistGen) setSync("บันทึกในเครื่องแล้ว (คลาวด์ยังไม่พร้อม)");
+        resolve({ ok: false, local: true });
+      }
+    };
+    // Group moves / renames: flush local+cloud promptly so UI doesn’t feel “ไม่ได้ย้าย”
+    persistTimer = setTimeout(run, immediate ? 0 : 450);
+  });
+  latestPersistPromise = promise;
+  return promise;
+}
+
+function showProgress(message, { mode = "busy" } = {}) {
+  if (!els.progressPopup || !els.progressPopupText) return;
+  clearTimeout(showProgress._hide);
+  els.progressPopup.hidden = false;
+  els.progressPopup.classList.toggle("is-ok", mode === "ok");
+  els.progressPopup.classList.toggle("is-err", mode === "err");
+  els.progressPopup.classList.toggle("is-busy", mode === "busy");
+  els.progressPopupText.textContent = message;
+}
+
+function hideProgress(delayMs = 0) {
+  if (!els.progressPopup) return;
+  clearTimeout(showProgress._hide);
+  if (delayMs > 0) {
+    showProgress._hide = setTimeout(() => {
+      els.progressPopup.hidden = true;
+    }, delayMs);
   } else {
-    persistTimer = setTimeout(run, 450);
+    els.progressPopup.hidden = true;
   }
+}
+
+async function finishMoveProgress({ expectedIds, nextCategory, successLabel }) {
+  const persist = await (latestPersistPromise || Promise.resolve({ ok: true, local: true }));
+  const ids = expectedIds || [];
+  let okCount = 0;
+  let failCount = 0;
+  for (const id of ids) {
+    const tx = state.transactions.find((t) => t.id === id);
+    if (tx && String(tx.category || "") === String(nextCategory || "")) okCount += 1;
+    else failCount += 1;
+  }
+  if (failCount > 0) {
+    showProgress(`ย้ายไม่ครบ ${failCount.toLocaleString("th-TH")} รายการ — ลองอีกครั้ง`, { mode: "err" });
+    hideProgress(4200);
+    return false;
+  }
+  if (!persist.ok && currentUser) {
+    showProgress(`${successLabel} · บันทึกในเครื่องแล้ว (คลาวด์รอซิงค์)`, { mode: "ok" });
+  } else {
+    showProgress(successLabel, { mode: "ok" });
+  }
+  hideProgress(2200);
+  return true;
 }
 
 function sortTransactions(list) {
@@ -1022,6 +1076,9 @@ function mergeSelectedGroups() {
   );
   if (!ok) return;
 
+  const movedIds = state.transactions.filter((t) => moving.includes(t.category)).map((t) => t.id);
+  showProgress(`กำลังย้าย ${totalMove.toLocaleString("th-TH")} รายการ → “${dest}”…`);
+
   withUndo(`รวมกลุ่มเข้า “${dest}”`, () => {
     for (const t of state.transactions) {
       if (moving.includes(t.category)) t.category = dest;
@@ -1051,11 +1108,16 @@ function mergeSelectedGroups() {
   schedulePersist({ immediate: true });
   scheduleRender();
   const still = els.filterCategory?.value || "";
-  toast(
+  const toastMsg =
     still && still !== dest
       ? `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ · ยังดู “${still}” อยู่`
-      : `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`
-  );
+      : `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`;
+  toast(toastMsg);
+  finishMoveProgress({
+    expectedIds: movedIds,
+    nextCategory: dest,
+    successLabel: `ย้ายสำเร็จ ${totalMove.toLocaleString("th-TH")} รายการ → “${dest}”`,
+  });
 }
 
 function renderGroupSummary() {
@@ -1273,6 +1335,79 @@ function printGroup(groupKey) {
   }, 300);
 }
 
+function printVisibleTable() {
+  if (!requireLogin()) return;
+  const rows = getTableFiltered().sort(
+    (a, b) => String(a.date).localeCompare(String(b.date)) || (a.amount || 0) - (b.amount || 0)
+  );
+  if (!rows.length) {
+    toast("ไม่มีรายการในมุมมองนี้ให้พิมพ์");
+    return;
+  }
+  const sumIn = rows.filter((t) => t.direction === "in").reduce((s, t) => s + (t.amount || 0), 0);
+  const sumOut = rows.filter((t) => t.direction === "out").reduce((s, t) => s + (t.amount || 0), 0);
+  const bounds = dataDateBounds(rows);
+  const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
+  const filterBits = [];
+  const cat = els.filterCategory?.value || "";
+  if (cat === "__uncat") filterBits.push("ยังไม่มีกลุ่ม");
+  else if (cat) filterBits.push(`กลุ่ม “${cat}”`);
+  const dir = els.filterDirection?.value || "";
+  if (dir === "in") filterBits.push("เงินเข้า");
+  if (dir === "out") filterBits.push("เงินออก");
+  const tq = String(els.tableSearch?.value || "").trim();
+  if (tq) filterBits.push(`ค้นหาตาราง “${tq}”`);
+  if (hasAmountRangeFilter()) filterBits.push("กรองช่วงยอด");
+  const scope = filterBits.length ? filterBits.join(" · ") : "ทุกกลุ่มในตัวกรองปัจจุบัน";
+
+  els.printRoot.hidden = false;
+  els.printRoot.innerHTML = `
+    <h1>TaxTag · ตารางรายละเอียด</h1>
+    <p class="print-sub">โปรเจกต์: ${escapeHtml(state.projectName || "—")}
+      · ${escapeHtml(periodLabelText())}
+      ${bounds ? ` · ข้อมูล ${escapeHtml(formatDateTh(bounds.from))} – ${escapeHtml(formatDateTh(bounds.to))}` : ""}
+      · ${rows.length.toLocaleString("th-TH")} รายการ
+      · พิมพ์ ${escapeHtml(printedAt)}
+      <br/>มุมมอง: ${escapeHtml(scope)}
+      <br/>เข้า ${escapeHtml(printMoney(sumIn))}
+      · ออก ${escapeHtml(printMoney(sumOut))}
+      · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>วันที่</th>
+          <th>รายละเอียด</th>
+          <th class="num">เข้า</th>
+          <th class="num">ออก</th>
+          <th>กลุ่ม</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(
+            (t) => `<tr>
+            <td>${escapeHtml(formatDateTh(t.date))}${t.time ? ` ${escapeHtml(t.time)}` : ""}</td>
+            <td>${escapeHtml(t.description || "")}</td>
+            <td class="num">${t.direction === "in" ? escapeHtml(printMoney(t.amount)) : ""}</td>
+            <td class="num">${t.direction === "out" ? escapeHtml(printMoney(t.amount)) : ""}</td>
+            <td>${escapeHtml(t.category || "")}</td>
+            <td>${escapeHtml(t.note || "")}</td>
+          </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>
+    <p class="totals">รวมเข้า ${escapeHtml(printMoney(sumIn))} · รวมออก ${escapeHtml(printMoney(sumOut))} · สุทธิ ${escapeHtml(printMoney(sumIn - sumOut))}</p>
+  `;
+  window.print();
+  setTimeout(() => {
+    els.printRoot.hidden = true;
+    els.printRoot.innerHTML = "";
+  }, 300);
+}
+
 function printOverview() {
   if (!requireLogin()) return;
   const base = getSummaryBase();
@@ -1432,16 +1567,17 @@ function renderTable() {
     .map((t) => {
       const cat = t.category || "";
       const checked = selectedIds.has(t.id) ? "checked" : "";
+      const when = t.time
+        ? `${escapeHtml(formatDateTh(t.date))} <span class="time-inline">${escapeHtml(t.time)}</span>`
+        : escapeHtml(formatDateTh(t.date));
+      const srcTitle = t.source ? ` title="${escapeHtml(t.source)}"` : "";
       return `<tr data-id="${t.id}" class="${selectedIds.has(t.id) ? "is-selected" : ""}">
         <td class="col-check"><input type="checkbox" data-check="${t.id}" ${checked} /></td>
-        <td>${escapeHtml(formatDateTh(t.date))}${t.time ? `<div class="desc-sub">${escapeHtml(t.time)}</div>` : ""}</td>
-        <td>
-          <div class="desc-main">${highlight(t.description, qHighlight)}</div>
-          <div class="desc-sub">${escapeHtml(t.source || "")}</div>
-        </td>
+        <td class="col-date">${when}</td>
+        <td class="col-desc"${srcTitle}><span class="desc-main">${highlight(t.description, qHighlight)}</span></td>
         <td class="num amount-in">${t.direction === "in" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
         <td class="num amount-out">${t.direction === "out" ? escapeHtml(formatMoney(t.amount)) : "—"}</td>
-        <td class="num">${escapeHtml(formatMoney(t.amount || 0))}</td>
+        <td class="num col-amount">${escapeHtml(formatMoney(t.amount || 0))}</td>
         <td><input class="cell-cat${cat ? " has-value" : ""}" list="category-datalist" data-cat="${t.id}" value="${escapeHtml(cat)}" placeholder="กลุ่ม…" /></td>
         <td><input class="cell-note" data-note="${t.id}" value="${escapeHtml(t.note || "")}" placeholder="Note…" /></td>
       </tr>`;
@@ -1613,6 +1749,10 @@ function applyBulk() {
   let auto = 0;
   const prevCats = [];
   const seeds = [];
+  const movedIds = group ? [...selectedIds] : [];
+  if (group) {
+    showProgress(`กำลังย้าย ${selectedIds.size.toLocaleString("th-TH")} รายการ → “${group}”…`);
+  }
   withUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, () => {
     for (const id of selectedIds) {
       const tx = state.transactions.find((t) => t.id === id);
@@ -1642,11 +1782,23 @@ function applyBulk() {
         ? `ใส่ให้ ${n.toLocaleString("th-TH")} ที่เลือก · ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")}`
         : `ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`;
     toast(stay ? `${base} · ${stay}` : base);
+    finishMoveProgress({
+      expectedIds: movedIds,
+      nextCategory: group,
+      successLabel: `ย้ายสำเร็จ ${n.toLocaleString("th-TH")} รายการ → “${group}”`,
+    });
     return;
   }
   schedulePersist({ immediate: true });
   scheduleRender();
   toast(`ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`);
+}
+
+function clearRenameForms() {
+  els.groupList?.querySelectorAll("[data-rename-form]").forEach((f) => f.remove());
+  els.groupList?.querySelectorAll(".group-title-row").forEach((el) => {
+    el.hidden = false;
+  });
 }
 
 function renameGroup(oldName, newName) {
@@ -1662,7 +1814,12 @@ function renameGroup(oldName, newName) {
     toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
     return false;
   }
-  if (next === prev) return false;
+  if (next === prev) {
+    // Same name = close form (was leaving rename UI stuck)
+    clearRenameForms();
+    scheduleRender();
+    return true;
+  }
   const nextBusy = state.transactions.some((t) => t.category === next);
   if (nextBusy) {
     toast("มีชื่อกลุ่มนี้แล้ว และมีรายการอยู่");
@@ -1689,6 +1846,8 @@ function renameGroup(oldName, newName) {
     }
     if (els.filterCategory.value === prev) els.filterCategory.value = next;
   });
+  // Must clear rename form before render — otherwise renderGroupSummary skips rebuild
+  clearRenameForms();
   schedulePersist({ immediate: true });
   scheduleRender();
   toast(`เปลี่ยนชื่อเป็น “${next}”`);
@@ -1745,9 +1904,11 @@ function beginRenameGroup(groupKey) {
     e.stopPropagation();
     const ok = renameGroup(groupKey, input.value);
     if (!ok) {
+      // validation failed — keep this form open
       input.focus();
       input.select();
     }
+    // success: renameGroup already cleared forms + scheduled render
   });
   form.querySelector("[data-rename-cancel]")?.addEventListener("click", (e) => {
     e.preventDefault();
@@ -2299,6 +2460,7 @@ function wireEvents() {
   });
 
   els.btnPrintOverview?.addEventListener("click", printOverview);
+  els.btnPrintTable?.addEventListener("click", printVisibleTable);
 
   els.btnClearSearch?.addEventListener("click", () => {
     els.search.value = "";

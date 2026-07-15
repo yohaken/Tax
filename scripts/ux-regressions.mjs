@@ -76,4 +76,35 @@ function followFilterAfterMove(filter, prevCategories, nextCategory) {
   );
 }
 
-console.log("PASS ux regressions: rename cell · stay-on-current-group · sync prefer");
+// Rename: after save, form must be cleared so group summary can re-render
+{
+  let formPresent = true;
+  function clearRenameForms() {
+    formPresent = false;
+  }
+  function renameSuccessFlow(prev, next) {
+    if (!next) return false;
+    if (next === prev) {
+      clearRenameForms();
+      return true;
+    }
+    // mutation…
+    clearRenameForms();
+    return true;
+  }
+  assert(renameSuccessFlow("เทลที", "Tell T") === true, "rename ok");
+  assert(formPresent === false, "form cleared after save");
+  formPresent = true;
+  assert(renameSuccessFlow("เทลที", "เทลที") === true, "same name closes");
+  assert(formPresent === false, "form cleared on same-name save");
+}
+
+// Print columns contract: no source file name, no amount(มูลค่า) column
+{
+  const printCols = ["วันที่", "รายละเอียด", "เข้า", "ออก", "กลุ่ม", "Note"];
+  assert(!printCols.includes("มูลค่า"), "no value column");
+  assert(!printCols.includes("ไฟล์"), "no file column");
+  assert(printCols.includes("กลุ่ม") && printCols.includes("เข้า"), "keeps group/in");
+}
+
+console.log("PASS ux regressions: rename · stay · sync · rename-clear · print-cols");

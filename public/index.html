@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=37" />
+  <link rel="stylesheet" href="css/app.css?v=38" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -147,7 +147,7 @@
         <button type="button" class="btn quiet tiny" id="btn-bulk-clear">เคลียร์ติ๊ก</button>
       </div>
 
-      <div class="table-tools" id="table-tools">
+        <div class="table-tools" id="table-tools">
         <div class="table-search-wrap">
           <input
             id="table-search-input"
@@ -157,6 +157,7 @@
             aria-label="ค้นหาในตารางรายละเอียด"
           />
           <button type="button" class="btn quiet tiny" id="btn-clear-table-search" title="เคลียร์ค่าค้นหาในตาราง">เคลียร์ค้นหา</button>
+          <button type="button" class="btn solid tiny" id="btn-print-table" title="พิมพ์ตารางที่เห็นตอนนี้ (กรองแล้วหรือทั้งหมด) เป็นเอกสาร">พิมพ์ตาราง</button>
         </div>
         <div class="amount-filters" id="amount-filters" aria-label="กรองช่วงยอดเงิน">
           <span class="amount-filters-title">ช่วงยอด</span>
@@ -181,7 +182,7 @@
           <button type="button" class="btn quiet tiny" id="btn-clear-amount-filters" title="ล้างตัวกรองยอด">ล้างยอด</button>
           <button type="button" class="btn quiet tiny" id="btn-clear-table-zone" title="เคลียร์ค้นหาตาราง · ช่วงยอด · ช่องกลุ่ม/Note ในแถบนี้">เคลียร์ทุกค่า</button>
         </div>
-        <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้</span>
+        <span class="table-search-hint" id="table-search-hint">กรองอีกชั้นจากตัวกรองด้านบน · ลากเมาส์ติ๊กหลายแถวได้ · พิมพ์ไม่โชว์ชื่อไฟล์และคอลัมน์มูลค่า</span>
       </div>
 
       <div class="table-scroll">
@@ -207,10 +208,14 @@
 
   <div id="print-root" class="print-root" hidden></div>
   <datalist id="category-datalist"></datalist>
+  <div class="progress-popup" id="progress-popup" hidden role="status" aria-live="polite">
+    <span class="progress-dot" aria-hidden="true"></span>
+    <span id="progress-popup-text">กำลังทำงาน…</span>
+  </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
-  <script type="module" src="js/app.js?v=37"></script>
+  <script type="module" src="js/app.js?v=38"></script>
 </body>
 </html>

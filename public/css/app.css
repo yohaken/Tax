@@ -225,8 +225,8 @@ body {
 }
 .table-search-wrap {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.35rem;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.3rem;
   align-items: center;
   flex: 1 1 18rem;
   min-width: min(100%, 18rem);
@@ -470,18 +470,18 @@ body.is-row-dragging .tx-table td {
 .group-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   min-width: 640px;
 }
 .group-table th,
 .group-table td {
-  padding: 0.35rem 0.4rem;
+  padding: 0.22rem 0.35rem;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: middle;
 }
 .group-table th {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--mute);
@@ -503,8 +503,8 @@ body.is-row-dragging .tx-table td {
   font-weight: 700;
   background: rgba(26, 26, 26, 0.03);
   border-bottom: 0;
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
 }
 .group-table .col-actions {
   width: 1%;
@@ -513,9 +513,9 @@ body.is-row-dragging .tx-table td {
 }
 .group-title-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.25rem;
   min-width: 0;
 }
 .group-title-btn {
@@ -524,6 +524,7 @@ body.is-row-dragging .tx-table td {
   background: transparent;
   padding: 0;
   font: inherit;
+  font-size: 0.8rem;
   font-weight: 650;
   color: inherit;
   cursor: pointer;
@@ -545,21 +546,24 @@ body.is-row-dragging .tx-table td {
 .muted { color: var(--mute); }
 .group-title-row .btn.tiny {
   flex: 0 0 auto;
-  padding: 0.15rem 0.45rem;
-  font-size: 0.72rem;
+  padding: 0.1rem 0.38rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
 }
 .rename-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 0.3rem;
-  margin: 0.2rem 0 0;
+  gap: 0.25rem;
+  margin: 0;
+  align-items: center;
 }
 .rename-form input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.3rem 0.45rem;
+  border-radius: 7px;
+  padding: 0.2rem 0.4rem;
   font: inherit;
+  font-size: 0.78rem;
   color: var(--ink);
   background: #fff;
 }
@@ -573,9 +577,9 @@ body.is-row-dragging .tx-table td {
   max-width: 11rem;
 }
 .group-note-cell .group-note {
-  padding: 0.25rem 0.4rem;
-  font-size: 0.8rem;
-  border-radius: 8px;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.74rem;
+  border-radius: 7px;
 }
 .group-actions {
   display: inline-flex;
@@ -587,13 +591,13 @@ body.is-row-dragging .tx-table td {
   white-space: nowrap;
 }
 .group-actions .btn.tiny {
-  padding: 0.18rem 0.5rem;
-  font-size: 0.72rem;
-  line-height: 1.2;
+  padding: 0.12rem 0.38rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
 }
 .btn.tiny {
-  padding: 0.28rem 0.65rem;
-  font-size: 0.78rem;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.74rem;
 }
 
 .print-root { display: none; }
@@ -601,6 +605,7 @@ body.is-row-dragging .tx-table td {
 @media print {
   body * { visibility: hidden !important; }
   .print-root, .print-root * { visibility: visible !important; }
+  .progress-popup, .toast { display: none !important; }
   .print-root {
     display: block !important;
     position: absolute;
@@ -655,20 +660,27 @@ body.is-row-dragging .tx-table td {
 .tx-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92rem;
+  font-size: 0.8rem;
 }
 .tx-table th,
 .tx-table td {
-  padding: 0.7rem 0.75rem;
+  padding: 0.28rem 0.45rem;
   border-bottom: 1px solid var(--line);
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.tx-table td.col-desc {
+  white-space: nowrap;
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tx-table th {
   position: sticky;
   top: 0;
   background: #faf8f4;
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--mute);
@@ -681,21 +693,37 @@ body.is-row-dragging .tx-table td {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.tx-table .col-date {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.76rem;
+}
+.tx-table .time-inline {
+  color: var(--mute);
+  font-size: 0.7rem;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
 .amount-in { color: var(--in); font-weight: 600; }
 .amount-out { color: var(--out); font-weight: 600; }
 
-.desc-main { font-weight: 500; }
-.desc-sub { color: var(--mute); font-size: 0.78rem; margin-top: 0.15rem; }
+.desc-main {
+  font-weight: 500;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desc-sub { color: var(--mute); font-size: 0.72rem; margin-top: 0; display: none; }
 
 .cell-cat,
 .cell-note {
   width: 100%;
-  min-width: 8rem;
+  min-width: 6.5rem;
   border: 1px solid transparent;
   background: transparent;
-  border-radius: 8px;
-  padding: 0.3rem 0.45rem;
+  border-radius: 7px;
+  padding: 0.15rem 0.35rem;
   font: inherit;
+  font-size: 0.78rem;
   color: var(--ink);
 }
 .cell-cat:hover,
@@ -735,6 +763,55 @@ body.is-row-dragging .tx-table td {
 .toast.show {
   transform: translateX(-50%) translateY(0);
   opacity: 1;
+}
+
+.progress-popup {
+  position: fixed;
+  left: 50%;
+  bottom: 4.2rem;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: min(92vw, 28rem);
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 28px rgba(26, 26, 26, 0.12);
+  font-size: 0.82rem;
+  font-weight: 600;
+  z-index: 45;
+}
+.progress-popup[hidden] { display: none !important; }
+.progress-popup.is-busy {
+  border-color: rgba(47, 93, 80, 0.35);
+}
+.progress-popup.is-ok {
+  border-color: rgba(31, 107, 74, 0.4);
+  background: #f3faf6;
+}
+.progress-popup.is-err {
+  border-color: rgba(154, 59, 26, 0.4);
+  background: #fff6f2;
+}
+.progress-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+.progress-popup.is-busy .progress-dot {
+  animation: progress-pulse 0.9s ease-in-out infinite;
+}
+.progress-popup.is-ok .progress-dot { background: var(--in); }
+.progress-popup.is-err .progress-dot { background: var(--out); }
+
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
 }
 
 .is-hidden { display: none !important; }
