@@ -210,6 +210,12 @@ const els = {
   printRoot: document.getElementById("print-root"),
   progressPopup: document.getElementById("progress-popup"),
   progressPopupText: document.getElementById("progress-popup-text"),
+  processPanel: document.getElementById("process-panel"),
+  processTitle: document.getElementById("process-title"),
+  processElapsed: document.getElementById("process-elapsed"),
+  processSteps: document.getElementById("process-steps"),
+  processDetail: document.getElementById("process-detail"),
+  processClose: document.getElementById("process-close"),
   txTable: document.getElementById("tx-table"),
   statScope: document.getElementById("stat-scope"),
   checkAll: document.getElementById("check-all"),
@@ -661,12 +667,27 @@ let persistGen = 0;
 let latestPersistPromise = null;
 
 function schedulePersist({ cloud = true, immediate = false } = {}) {
-  saveState(state, workspace);
-  setSync(currentUser ? "บันทึกในเครื่องแล้ว · กำลังซิงค์…" : "บันทึกอัตโนมัติ");
+  let localOk = true;
+  let localErr = null;
+  try {
+    saveState(state, workspace);
+  } catch (err) {
+    localOk = false;
+    localErr = err;
+    console.warn(err);
+    setSync(`บันทึกในเครื่องล้มเหลว · ${err?.message || err}`);
+  }
+  if (localOk) {
+    setSync(currentUser ? "บันทึกในเครื่องแล้ว · กำลังซิงค์…" : "บันทึกอัตโนมัติ");
+  }
   clearTimeout(persistTimer);
   const gen = ++persistGen;
   const promise = new Promise((resolve) => {
     const run = async () => {
+      if (!localOk) {
+        resolve({ ok: false, local: false, error: localErr });
+        return;
+      }
       if (!cloud || !currentUser || !cloudReady) {
         if (gen === persistGen) {
           setSync(currentUser ? `ออนไลน์ · ${currentUser.email}` : "บันทึกอัตโนมัติในเครื่อง");
@@ -677,11 +698,11 @@ function schedulePersist({ cloud = true, immediate = false } = {}) {
       try {
         await pushCloudState(currentUser.uid, state, workspace);
         if (gen === persistGen) setSync(`ซิงค์แล้ว · ${currentUser.email}`);
-        resolve({ ok: true, cloud: true });
+        resolve({ ok: true, cloud: true, local: true });
       } catch (err) {
         console.warn(err);
         if (gen === persistGen) setSync("บันทึกในเครื่องแล้ว (คลาวด์ยังไม่พร้อม)");
-        resolve({ ok: false, local: true });
+        resolve({ ok: false, local: true, cloud: false, error: err });
       }
     };
     // Group moves / renames: flush local+cloud promptly so UI doesn’t feel “ไม่ได้ย้าย”
@@ -713,14 +734,193 @@ function hideProgress(delayMs = 0) {
   }
 }
 
-function finishMoveProgress({ expectedIds, nextCategory, successLabel }) {
-  // Verify local state immediately — never wait on cloud sync (large projects hang for ages).
-  const ids = expectedIds || [];
+function yieldToUi() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
+
+function msLabel(ms) {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+/** Step-by-step technical process panel for move/merge operations. */
+const moveProcess = {
+  steps: /** @type {{ id: string, label: string, status: string, tech: string, ms: number|null, t0: number|null }[]} */ ([]),
+  startedAt: 0,
+  tickTimer: 0,
+  watchdog: 0,
+  activeStepId: "",
+
+  open(title) {
+    hideProgress();
+    this.steps = [];
+    this.startedAt = performance.now();
+    this.activeStepId = "";
+    if (els.processTitle) els.processTitle.textContent = title;
+    if (els.processDetail) els.processDetail.textContent = "";
+    if (els.processClose) els.processClose.hidden = true;
+    if (els.processPanel) {
+      els.processPanel.hidden = false;
+      els.processPanel.classList.remove("is-ok", "is-err");
+    }
+    this.render();
+    clearInterval(this.tickTimer);
+    this.tickTimer = window.setInterval(() => this.updateElapsed(), 120);
+    clearTimeout(this.watchdog);
+    this.watchdog = window.setTimeout(() => {
+      if (!this.activeStepId) return;
+      const step = this.steps.find((s) => s.id === this.activeStepId && s.status === "run");
+      if (!step) return;
+      step.tech = `${step.tech || ""}${step.tech ? " · " : ""}ค้างนาน >8s — น่าจะบล็อก main thread (clone/JSON/localStorage/คลาวด์)`.trim();
+      this.paintDetail(
+        `TIMEOUT step=${step.id}\nlabel=${step.label}\nms=${msLabel(performance.now() - this.startedAt)}\ntx=${state.transactions.length}\n` +
+          `ถ้าติดที่ save-local = localStorage ใหญ่เกิน / QuotaExceeded\n` +
+          `ถ้าติดที่ undo-snapshot = clone ${state.transactions.length} รายการช้าบนมือถือ`
+      );
+      this.render();
+    }, 8000);
+  },
+
+  updateElapsed() {
+    if (els.processElapsed) {
+      els.processElapsed.textContent = msLabel(performance.now() - this.startedAt);
+    }
+  },
+
+  render() {
+    if (!els.processSteps) return;
+    els.processSteps.innerHTML = this.steps
+      .map((s) => {
+        const mark =
+          s.status === "ok" ? "✓" : s.status === "err" ? "!" : s.status === "run" ? "●" : s.status === "skip" ? "–" : "○";
+        const ms = s.ms != null ? msLabel(s.ms) : s.status === "run" ? "…" : "";
+        return `<li class="process-step is-${s.status}" data-step="${escapeHtml(s.id)}">
+          <span class="process-step-mark" aria-hidden="true">${mark}</span>
+          <span><span class="process-step-label">${escapeHtml(s.label)}</span>${
+            s.tech ? `<span class="process-step-tech">${escapeHtml(s.tech)}</span>` : ""
+          }</span>
+          <span class="process-step-ms">${escapeHtml(ms)}</span>
+        </li>`;
+      })
+      .join("");
+    this.updateElapsed();
+  },
+
+  paintDetail(text) {
+    if (els.processDetail) els.processDetail.textContent = text || "";
+  },
+
+  define(id, label, tech = "") {
+    this.steps.push({ id, label, status: "wait", tech, ms: null, t0: null });
+    this.render();
+  },
+
+  async start(id, tech) {
+    const step = this.steps.find((s) => s.id === id);
+    if (!step) return;
+    this.activeStepId = id;
+    step.status = "run";
+    step.t0 = performance.now();
+    if (tech) step.tech = tech;
+    this.render();
+    await yieldToUi();
+  },
+
+  ok(id, tech) {
+    const step = this.steps.find((s) => s.id === id);
+    if (!step) return;
+    step.status = "ok";
+    step.ms = step.t0 != null ? performance.now() - step.t0 : 0;
+    if (tech) step.tech = tech;
+    if (this.activeStepId === id) this.activeStepId = "";
+    this.render();
+  },
+
+  skip(id, tech = "ข้าม") {
+    const step = this.steps.find((s) => s.id === id);
+    if (!step) return;
+    step.status = "skip";
+    step.ms = 0;
+    step.tech = tech;
+    if (this.activeStepId === id) this.activeStepId = "";
+    this.render();
+  },
+
+  fail(id, err) {
+    const step = this.steps.find((s) => s.id === id);
+    const msg = err?.message || String(err || "unknown error");
+    const name = err?.name ? `${err.name}: ` : "";
+    if (step) {
+      step.status = "err";
+      step.ms = step.t0 != null ? performance.now() - step.t0 : null;
+      step.tech = `${name}${msg}`;
+    }
+    this.activeStepId = "";
+    if (els.processPanel) {
+      els.processPanel.classList.add("is-err");
+      els.processPanel.classList.remove("is-ok");
+    }
+    if (els.processTitle) els.processTitle.textContent = "ย้ายล้มเหลว — ดูขั้นตอนที่ติด";
+    if (els.processClose) els.processClose.hidden = false;
+    this.paintDetail(
+      `FAIL step=${id}\n${name}${msg}\n` +
+        `elapsed=${msLabel(performance.now() - this.startedAt)}\n` +
+        `txCount=${state.transactions.length}\n` +
+        `cloudReady=${cloudReady} user=${currentUser?.email || "-"}\n` +
+        `build=${buildLabel()}`
+    );
+    clearInterval(this.tickTimer);
+    clearTimeout(this.watchdog);
+    this.render();
+  },
+
+  markLocalDone(title, detail = "") {
+    this.activeStepId = "";
+    clearTimeout(this.watchdog);
+    if (els.processTitle) els.processTitle.textContent = title;
+    if (els.processPanel) {
+      els.processPanel.classList.add("is-ok");
+      els.processPanel.classList.remove("is-err");
+    }
+    if (detail) this.paintDetail(detail);
+    if (els.processClose) els.processClose.hidden = false;
+    this.updateElapsed();
+  },
+
+  succeed(title, detail = "", { autoHideMs = 3200 } = {}) {
+    this.markLocalDone(title, detail);
+    clearInterval(this.tickTimer);
+    clearTimeout(this.watchdog);
+    clearTimeout(this._autoHide);
+    if (autoHideMs > 0) {
+      this._autoHide = window.setTimeout(() => this.close(), autoHideMs);
+    }
+  },
+
+  close() {
+    clearInterval(this.tickTimer);
+    clearTimeout(this.watchdog);
+    clearTimeout(this._autoHide);
+    this.activeStepId = "";
+    if (els.processPanel) els.processPanel.hidden = true;
+  },
+};
+
+function verifyMovedIds(expectedIds, nextCategory) {
+  const want = String(nextCategory || "");
+  const byId = new Map(state.transactions.map((t) => [t.id, t]));
   let failCount = 0;
-  for (const id of ids) {
-    const tx = state.transactions.find((t) => t.id === id);
-    if (!(tx && String(tx.category || "") === String(nextCategory || ""))) failCount += 1;
+  for (const id of expectedIds || []) {
+    const tx = byId.get(id);
+    if (!(tx && String(tx.category || "") === want)) failCount += 1;
   }
+  return failCount;
+}
+
+function finishMoveProgress({ expectedIds, nextCategory, successLabel }) {
+  const failCount = verifyMovedIds(expectedIds, nextCategory);
   if (failCount > 0) {
     showProgress(`ย้ายไม่ครบ ${failCount.toLocaleString("th-TH")} รายการ — ลองอีกครั้ง`, { mode: "err" });
     hideProgress(4200);
@@ -729,6 +929,57 @@ function finishMoveProgress({ expectedIds, nextCategory, successLabel }) {
   showProgress(successLabel, { mode: "ok" });
   hideProgress(1600);
   return true;
+}
+
+async function runLocalSaveStep(proc) {
+  await proc.start("save-local", `JSON.stringify + localStorage · tx=${state.transactions.length}`);
+  const t0 = performance.now();
+  try {
+    saveState(state, workspace);
+    const ms = performance.now() - t0;
+    proc.ok("save-local", `บันทึกในเครื่องแล้ว · ${msLabel(ms)} · tx=${state.transactions.length}`);
+    setSync(currentUser ? "บันทึกในเครื่องแล้ว · กำลังซิงค์…" : "บันทึกอัตโนมัติในเครื่อง");
+    return { ok: true, ms };
+  } catch (err) {
+    proc.fail("save-local", err);
+    throw err;
+  }
+}
+
+function withTimeout(promise, ms, label) {
+  let timer = 0;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(`${label} timeout >${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function runCloudSyncStep(proc) {
+  if (!currentUser || !cloudReady) {
+    proc.skip("save-cloud", !currentUser ? "ยังไม่ล็อกอิน — ข้ามคลาวด์" : "cloudReady=false — ข้าม");
+    return { ok: true, skipped: true };
+  }
+  await proc.start(
+    "save-cloud",
+    `Firestore setDoc · uid=${currentUser.uid.slice(0, 6)}… · tx=${state.transactions.length} · timeout 20s`
+  );
+  const t0 = performance.now();
+  try {
+    await withTimeout(pushCloudState(currentUser.uid, state, workspace), 20000, "firestore setDoc");
+    const ms = performance.now() - t0;
+    proc.ok("save-cloud", `ซิงค์คลาวด์สำเร็จ · ${msLabel(ms)}`);
+    setSync(`ซิงค์แล้ว · ${currentUser.email}`);
+    return { ok: true, ms };
+  } catch (err) {
+    // Local move already done — cloud failure must not look like a stuck move.
+    proc.ok("save-cloud", `คลาวด์ล้มเหลว/ช้า แต่ข้อมูลในเครื่องย้ายแล้ว · ${err?.message || err}`);
+    setSync("บันทึกในเครื่องแล้ว (คลาวด์ยังไม่พร้อม)");
+    proc.paintDetail(
+      `CLOUD WARN\n${err?.name || "Error"}: ${err?.message || err}\n` +
+        `รายการในเครื่องถูกต้องแล้ว — คลาวด์จะลองซิงค์รอบถัดไป`
+    );
+    return { ok: false, error: err };
+  }
 }
 
 function sortTransactions(list) {
@@ -1403,7 +1654,7 @@ function applyTxColLayout() {
   }
 }
 
-function mergeSelectedGroups() {
+async function mergeSelectedGroups() {
   if (!requireLogin()) return;
   const sources = getMergeSources();
   const dest = getMergeDestination();
@@ -1424,6 +1675,7 @@ function mergeSelectedGroups() {
 
   // Destination may be an existing group that was NOT ticked — that is intentional.
   const allKeys = [...new Set([...moving, dest])];
+  const sourceSet = new Set(moving);
   const counts = moving.map((k) => state.transactions.filter((t) => t.category === k).length);
   const destCount = state.transactions.filter((t) => t.category === dest).length;
   const totalMove = counts.reduce((s, n) => s + n, 0);
@@ -1439,15 +1691,31 @@ function mergeSelectedGroups() {
   );
   if (!ok) return;
 
-  const movedIds = state.transactions.filter((t) => moving.includes(t.category)).map((t) => t.id);
-  showProgress(`กำลังย้าย ${totalMove.toLocaleString("th-TH")} รายการ → “${dest}”…`);
+  const movedIds = state.transactions.filter((t) => sourceSet.has(t.category)).map((t) => t.id);
+  const proc = moveProcess;
+  proc.open(`รวมกลุ่ม → “${dest}” · ${totalMove.toLocaleString("th-TH")} รายการ`);
+  proc.define("prepare", "เตรียมรายการที่ย้าย", `groups=${moving.length} · ids=${movedIds.length}`);
+  proc.define("undo-snapshot", "สร้างจุดเลิกทำ (clone ในเครื่อง)", `clone transactions×${state.transactions.length}`);
+  proc.define("mutate", "อัปเดต category ในหน่วยความจำ", "ไม่แตะเครือข่าย");
+  proc.define("verify", "ตรวจว่า category ตรงปลายทาง", "Map lookup · ไม่รอคลาวด์");
+  proc.define("ui", "รีเฟรชตาราง/กลุ่ม", "scheduleRender");
+  proc.define("save-local", "บันทึก localStorage", "จุดที่มักช้าบนมือถือ");
+  proc.define("save-cloud", "ซิงค์ Firestore", "ทำหลังย้ายในเครื่องสำเร็จ");
 
-  withUndo(`รวมกลุ่มเข้า “${dest}”`, () => {
+  try {
+    await proc.start("prepare");
+    proc.ok("prepare", `จะย้าย ${totalMove.toLocaleString("th-TH")} รายการจาก ${moving.length} กลุ่ม`);
+
+    await proc.start("undo-snapshot", `cloneStateSlice · ${state.transactions.length} txs`);
+    const before = cloneStateSlice();
+    proc.ok("undo-snapshot", `snapshot พร้อม · bytes≈${before.transactions.length} rows`);
+
+    await proc.start("mutate");
     for (const t of state.transactions) {
-      if (moving.includes(t.category)) t.category = dest;
+      if (sourceSet.has(t.category)) t.category = dest;
     }
     for (const r of state.rules) {
-      if (moving.includes(r.category)) r.category = dest;
+      if (sourceSet.has(r.category)) r.category = dest;
     }
     const noteParts = allKeys
       .map((k) => String(state.groupNotes?.[k] || "").trim())
@@ -1461,26 +1729,54 @@ function mergeSelectedGroups() {
     }
     state.categories = [
       dest,
-      ...state.categories.filter((c) => c !== dest && !moving.includes(c)),
+      ...state.categories.filter((c) => c !== dest && !sourceSet.has(c)),
     ];
-    // Stay on the currently filtered group — do not jump focus to destination.
-  });
-  selectedGroupKeys.clear();
-  clearMergeTarget();
-  updateGroupMergeBar();
-  schedulePersist({ immediate: true });
-  scheduleRender();
-  const still = els.filterCategory?.value || "";
-  const toastMsg =
-    still && still !== dest
-      ? `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ · ยังดู “${still}” อยู่`
-      : `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`;
-  toast(toastMsg);
-  finishMoveProgress({
-    expectedIds: movedIds,
-    nextCategory: dest,
-    successLabel: `ย้ายสำเร็จ ${totalMove.toLocaleString("th-TH")} รายการ → “${dest}”`,
-  });
+    pushUndo(`รวมกลุ่มเข้า “${dest}”`, before);
+    proc.ok("mutate", "อัปเดตใน RAM แล้ว");
+
+    await proc.start("verify");
+    const failCount = verifyMovedIds(movedIds, dest);
+    if (failCount > 0) {
+      throw new Error(`verify failed · ${failCount} ids ยังไม่เป็น “${dest}”`);
+    }
+    proc.ok("verify", `ครบ ${movedIds.length.toLocaleString("th-TH")} รายการ`);
+
+    await proc.start("ui");
+    selectedGroupKeys.clear();
+    clearMergeTarget();
+    updateGroupMergeBar();
+    scheduleRender();
+    refreshCategoryOptions();
+    proc.ok("ui", "ตั้งคิว render แล้ว");
+
+    const still = els.filterCategory?.value || "";
+    const toastMsg =
+      still && still !== dest
+        ? `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ · ยังดู “${still}” อยู่`
+        : `รวมเข้า “${dest}” แล้ว · ย้าย ${totalMove.toLocaleString("th-TH")} รายการ`;
+    toast(toastMsg);
+
+    // Local success first — never block the “moved” signal on storage/network.
+    proc.markLocalDone(
+      `ย้ายในเครื่องสำเร็จ · กำลังบันทึก…`,
+      `local verify OK · ${totalMove} → “${dest}”\nelapsed ${msLabel(performance.now() - proc.startedAt)}`
+    );
+
+    await runLocalSaveStep(proc);
+    await runCloudSyncStep(proc);
+    persistGen += 1; // cancel any older deferred persist races
+    proc.succeed(
+      `ย้ายสำเร็จ ${totalMove.toLocaleString("th-TH")} รายการ → “${dest}”`,
+      `DONE merge → ${dest}\n` +
+        `moved=${totalMove} · txTotal=${state.transactions.length}\n` +
+        `elapsed=${msLabel(performance.now() - proc.startedAt)}\n` +
+        `build=${buildLabel()}`
+    );
+  } catch (err) {
+    console.warn(err);
+    proc.fail(proc.activeStepId || "mutate", err);
+    toast(err?.message || "รวมกลุ่มไม่สำเร็จ");
+  }
 }
 
 function renderGroupSummary() {
@@ -2387,7 +2683,7 @@ function patchTx(id, patch, { learn = false, recordUndo = true, undoLabel = "แ
   schedulePersist({ immediate: Boolean(learn && patch.category) });
 }
 
-function applyBulk() {
+async function applyBulk() {
   if (!requireLogin()) return;
   if (!selectedIds.size) {
     toast("ยังไม่ได้ติ๊กรายการ");
@@ -2403,59 +2699,123 @@ function applyBulk() {
     toast("ใช้ชื่อกลุ่มนี้ไม่ได้");
     return;
   }
+
+  // Note-only bulk: keep the lightweight path (no move process panel).
+  if (!group) {
+    let n = 0;
+    withUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, () => {
+      for (const id of selectedIds) {
+        const tx = state.transactions.find((t) => t.id === id);
+        if (!tx) continue;
+        if (note !== "") tx.note = note;
+        n += 1;
+      }
+    });
+    schedulePersist({ immediate: true });
+    scheduleRender();
+    toast(`ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`);
+    return;
+  }
+
+  const movedIds = [...selectedIds];
+  const proc = moveProcess;
+  proc.open(`ย้าย ${movedIds.length.toLocaleString("th-TH")} รายการ → “${group}”`);
+  proc.define("prepare", "เตรียมรายการที่ติ๊ก", `selectedIds=${movedIds.length}`);
+  proc.define("undo-snapshot", "สร้างจุดเลิกทำ (clone ในเครื่อง)", `clone transactions×${state.transactions.length}`);
+  proc.define("mutate", "อัปเดต category ในหน่วยความจำ", "ไม่แตะเครือข่าย");
+  proc.define("verify", "ตรวจว่า category ตรงปลายทาง", "Map lookup · ไม่รอคลาวด์");
+  proc.define("ui", "รีเฟรชตาราง/ตัวกรอง", "scheduleRender + selection prune");
+  proc.define("save-local", "บันทึก localStorage", "จุดที่มักช้า/QuotaExceeded บนมือถือ");
+  proc.define("save-cloud", "ซิงค์ Firestore", "ทำหลังย้ายในเครื่องสำเร็จ");
+  proc.define("auto-rules", "เสนอสร้างกฎอัตโนมัติ", "confirm() หลังย้ายเสร็จ — ไม่บล็อกสถานะย้าย");
+
   let n = 0;
   const prevCats = [];
   const seeds = [];
-  const movedIds = group ? [...selectedIds] : [];
-  if (group) {
-    showProgress(`กำลังย้าย ${selectedIds.size.toLocaleString("th-TH")} รายการ → “${group}”…`);
-  }
-  // Move locally first — never block on auto-rule confirm / cloud sync mid-flight.
-  withUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, () => {
-    for (const id of selectedIds) {
-      const tx = state.transactions.find((t) => t.id === id);
+
+  try {
+    await proc.start("prepare", `dest=${group}`);
+    const byId = new Map(state.transactions.map((t) => [t.id, t]));
+    proc.ok("prepare", `พบ index ${byId.size.toLocaleString("th-TH")} รายการ`);
+
+    await proc.start("undo-snapshot", `cloneStateSlice · ${state.transactions.length} txs`);
+    const before = cloneStateSlice();
+    proc.ok("undo-snapshot", `snapshot พร้อม · ${before.transactions.length} rows`);
+
+    await proc.start("mutate");
+    for (const id of movedIds) {
+      const tx = byId.get(id);
       if (!tx) continue;
       prevCats.push(tx.category || "");
-      if (group) {
-        tx.category = group;
-        seeds.push(tx);
-      }
+      tx.category = group;
+      seeds.push(tx);
       if (note !== "") tx.note = note;
       n += 1;
     }
-    if (group && !state.categories.includes(group)) state.categories.unshift(group);
-  });
-  if (group) {
+    if (!state.categories.includes(group)) state.categories.unshift(group);
+    pushUndo(`ใส่กลุ่ม/Note ให้ที่เลือก`, before);
+    proc.ok("mutate", `แก้ใน RAM ${n.toLocaleString("th-TH")} รายการ`);
+
+    await proc.start("verify");
+    const failCount = verifyMovedIds(movedIds, group);
+    if (failCount > 0) {
+      throw new Error(`verify failed · ${failCount} ids ยังไม่เป็น “${group}”`);
+    }
+    proc.ok("verify", `ครบ ${n.toLocaleString("th-TH")} รายการในเครื่อง`);
+
+    await proc.start("ui");
     const stay = followFilterAfterMove(prevCats, group);
     const stillVisible = new Set(getTableFiltered().map((t) => t.id));
     for (const id of [...selectedIds]) {
       if (!stillVisible.has(id)) selectedIds.delete(id);
     }
-    schedulePersist({ immediate: true });
     scheduleRender();
     refreshCategoryOptions();
-    finishMoveProgress({
-      expectedIds: movedIds,
-      nextCategory: group,
-      successLabel: `ย้ายสำเร็จ ${n.toLocaleString("th-TH")} รายการ → “${group}”`,
-    });
+    proc.ok("ui", stay || "ตั้งคิว render แล้ว");
+
     toast(stay ? `ย้ายแล้ว ${n.toLocaleString("th-TH")} รายการ · ${stay}` : `ย้ายแล้ว ${n.toLocaleString("th-TH")} รายการ`);
-    // Offer auto-tag AFTER the move finished so the busy popup never sticks on confirm().
+    proc.markLocalDone(
+      `ย้ายในเครื่องสำเร็จ · กำลังบันทึก…`,
+      `local verify OK · ${n} → “${group}”\nelapsed ${msLabel(performance.now() - proc.startedAt)}`
+    );
+
+    await runLocalSaveStep(proc);
+    await runCloudSyncStep(proc);
+    persistGen += 1;
+
     if (seeds.length) {
-      queueMicrotask(() => {
-        const auto = learnRulesFromSeeds(seeds, group);
-        if (auto > 0) {
-          toast(`ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")} รายการ`);
-          schedulePersist({ immediate: true });
-          scheduleRender();
+      await proc.start("auto-rules", "previewApplyRules บนรายการที่ยังว่าง — อาจช้าถ้า rules เยอะ");
+      await yieldToUi();
+      const auto = learnRulesFromSeeds(seeds, group);
+      if (auto > 0) {
+        toast(`ติดอัตโนมัติเพิ่ม ${auto.toLocaleString("th-TH")} รายการ`);
+        try {
+          saveState(state, workspace);
+        } catch (err) {
+          console.warn(err);
         }
-      });
+        schedulePersist({ cloud: true, immediate: true });
+        scheduleRender();
+        proc.ok("auto-rules", `ติดเพิ่ม ${auto.toLocaleString("th-TH")} รายการ`);
+      } else {
+        proc.skip("auto-rules", "ผู้ใช้ยกเลิก หรือไม่มีรายการคล้ายกัน");
+      }
+    } else {
+      proc.skip("auto-rules", "ไม่มี seed");
     }
-    return;
+
+    proc.succeed(
+      `ย้ายสำเร็จ ${n.toLocaleString("th-TH")} รายการ → “${group}”`,
+      `DONE bulk → ${group}\n` +
+        `moved=${n} · txTotal=${state.transactions.length}\n` +
+        `elapsed=${msLabel(performance.now() - proc.startedAt)}\n` +
+        `build=${buildLabel()}`
+    );
+  } catch (err) {
+    console.warn(err);
+    proc.fail(proc.activeStepId || "mutate", err);
+    toast(err?.message || "ย้ายไม่สำเร็จ");
   }
-  schedulePersist({ immediate: true });
-  scheduleRender();
-  toast(`ใส่ให้ ${n.toLocaleString("th-TH")} รายการที่เลือกแล้ว`);
 }
 
 function clearRenameForms() {
@@ -3695,6 +4055,7 @@ function wireEvents() {
     scheduleRender();
   });
 
+  els.processClose?.addEventListener("click", () => moveProcess.close());
   els.btnBulkApply?.addEventListener("click", applyBulk);
   els.btnBulkClear?.addEventListener("click", () => {
     selectedIds.clear();

@@ -120,33 +120,45 @@ export function loadWorkspace() {
 }
 
 export function saveWorkspace(workspace) {
-  localStorage.setItem(
-    WORKSPACE_KEY,
-    JSON.stringify({
-      activeId: workspace.activeId,
-      projects: workspace.projects,
-      savedAt: new Date().toISOString(),
-    })
-  );
-  // Keep legacy key in sync with active project for older code paths / backup.
-  const active = workspace.projects.find((p) => p.id === workspace.activeId) || workspace.projects[0];
-  if (active) {
+  const savedAt = new Date().toISOString();
+  try {
     localStorage.setItem(
-      STORAGE_KEY,
+      WORKSPACE_KEY,
       JSON.stringify({
-        transactions: active.transactions,
-        categories: active.categories,
-        rules: active.rules,
-        groupNotes: active.groupNotes || {},
-        groupNicknames: active.groupNicknames || {},
-        projectSource: active.projectSource || "",
-        projectId: active.id,
-        projectName: active.name,
-        fileName: active.fileName || "",
-        savedAt: new Date().toISOString(),
+        activeId: workspace.activeId,
+        projects: workspace.projects,
+        savedAt,
       })
     );
+  } catch (err) {
+    const name = err?.name || "Error";
+    const msg = err?.message || String(err);
+    throw new Error(`localStorage WORKSPACE ${name}: ${msg}`);
   }
+  // Legacy key: sync on next tick so a large double-write doesn't freeze the UI move path.
+  const active = workspace.projects.find((p) => p.id === workspace.activeId) || workspace.projects[0];
+  if (!active) return;
+  const legacyPayload = JSON.stringify({
+    transactions: active.transactions,
+    categories: active.categories,
+    rules: active.rules,
+    groupNotes: active.groupNotes || {},
+    groupNicknames: active.groupNicknames || {},
+    projectSource: active.projectSource || "",
+    projectId: active.id,
+    projectName: active.name,
+    fileName: active.fileName || "",
+    savedAt,
+  });
+  const writeLegacy = () => {
+    try {
+      localStorage.setItem(STORAGE_KEY, legacyPayload);
+    } catch (err) {
+      console.warn("legacy localStorage write failed", err);
+    }
+  };
+  if (typeof queueMicrotask === "function") queueMicrotask(writeLegacy);
+  else setTimeout(writeLegacy, 0);
 }
 
 export function loadState() {
