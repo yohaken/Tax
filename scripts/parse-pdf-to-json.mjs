@@ -15,6 +15,9 @@ const {
   reconcileDirectionsFromBalances,
   parseMoney,
 } = await import(parserUrl);
+const { tagDiscoveryReview } = await import(
+  pathToFileURL(path.resolve("public/js/discovery-review.js")).href
+);
 
 async function extractLines(buffer) {
   const doc = await pdfjs.getDocument({ data: buffer, useSystemFonts: true }).promise;
@@ -97,6 +100,7 @@ function extractStatementSummary(lines, numPages) {
 
 const pdfPath = process.argv[2] || "public/telltea_2024-2025_full.pdf";
 const outPath = process.argv[3] || "public/data/telltea_2024-2025.json";
+const previousPath = process.argv[4] || "";
 const fileName = path.basename(pdfPath);
 const buffer = new Uint8Array(fs.readFileSync(pdfPath));
 console.log("pages extract…", pdfPath, buffer.byteLength);
@@ -110,6 +114,25 @@ txs = dedupeTransactions(txs);
 const reconciled = reconcileDirectionsFromBalances(txs);
 txs = reconciled.transactions;
 console.log("direction fixes from balance", reconciled.fixed);
+
+let previous = [];
+if (previousPath && fs.existsSync(previousPath)) {
+  try {
+    const prevPayload = JSON.parse(fs.readFileSync(previousPath, "utf8"));
+    previous = Array.isArray(prevPayload.transactions) ? prevPayload.transactions : [];
+    console.log("previous txs", previous.length, "from", previousPath);
+  } catch (err) {
+    console.warn("could not read previous", err.message);
+  }
+}
+
+const discovery = tagDiscoveryReview(txs, previous);
+txs = discovery.transactions;
+console.log("discovery review", {
+  tagged: discovery.tagged,
+  brandNew: discovery.brandNew,
+  dirFlip: discovery.dirFlip,
+});
 console.log("transactions", txs.length);
 
 const money = txs.filter((t) => t.amount > 0);
@@ -123,16 +146,20 @@ const parsed = {
   withdrawCount: outs.length,
   withdrawTotal: Number(sum(outs).toFixed(2)),
   lastBalance: money.filter((t) => t.balance != null).slice(-1)[0]?.balance ?? null,
+  discoveryTagged: discovery.tagged,
+  discoveryBrandNew: discovery.brandNew,
+  discoveryDirFlip: discovery.dirFlip,
 };
 console.log("parsed totals", parsed);
 if (statementSummary.depositTotal != null) {
+  const inOk = Math.abs(parsed.depositTotal - statementSummary.depositTotal) < 0.05;
+  const outOk = Math.abs(parsed.withdrawTotal - statementSummary.withdrawTotal) < 0.05;
   console.log(
-    "delta vs statement header",
-    "in",
-    parsed.depositCount - statementSummary.depositCount,
+    "match statement header?",
+    inOk && outOk,
+    "delta in",
     (parsed.depositTotal - statementSummary.depositTotal).toFixed(2),
     "out",
-    parsed.withdrawCount - statementSummary.withdrawCount,
     (parsed.withdrawTotal - statementSummary.withdrawTotal).toFixed(2)
   );
 }

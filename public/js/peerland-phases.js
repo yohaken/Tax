@@ -1,3 +1,5 @@
+import { DISCOVERY_REVIEW_GROUP } from "./discovery-review.js";
+
 /**
  * Peerland grouping plan — Phases 1–5
  *
@@ -62,6 +64,7 @@ export const PEERLAND_PHASE5_CATEGORIES = [
 ];
 
 export const PEERLAND_CATEGORIES = [
+  DISCOVERY_REVIEW_GROUP,
   ...PEERLAND_PHASE1_CATEGORIES,
   ...PEERLAND_PHASE2_CATEGORIES,
   ...PEERLAND_PHASE3_CATEGORIES,

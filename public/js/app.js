@@ -42,6 +42,11 @@ import {
   TELLTEA_PHASE_META,
   applyTellteaPhasesAll,
 } from "./telltea-phases.js";
+import {
+  DISCOVERY_REVIEW_GROUP,
+  tagDiscoveryReview,
+  ensureDiscoveryReviewCategory,
+} from "./discovery-review.js";
 
 const workspace = loadWorkspace();
 const state = loadState();
@@ -287,6 +292,11 @@ function paintProjectNickUi() {
 
 function isPeerlandProject() {
   const blob = `${state.fileName || ""} ${state.projectName || ""}`;
+  return /peerland/i.test(blob);
+}
+
+function isPeerlandProjectMeta(p) {
+  const blob = `${p?.fileName || ""} ${p?.name || ""} ${p?.projectSource || ""}`;
   return /peerland/i.test(blob);
 }
 
@@ -2493,8 +2503,10 @@ async function loadBundledDataFile({
     return p.fileName === fileName || p.name === projectName || p.name === fileStem(fileName);
   };
 
+  let previousTxs = [];
   if (forceReplace) {
     const removed = workspace.projects.filter(matches);
+    previousTxs = removed.flatMap((p) => (Array.isArray(p.transactions) ? p.transactions : []));
     if (removed.length) {
       syncActiveFromState();
       workspace.projects = workspace.projects.filter((p) => !matches(p));
@@ -2541,7 +2553,15 @@ async function loadBundledDataFile({
   }));
   if (!rows.length) throw new Error(`ไม่พบรายการใน ${fileName}`);
 
-  let categories = Array.isArray(starterCategories) ? [...starterCategories] : [];
+  // Keep JSON discovery tags; also tag diffs vs the project we just replaced
+  if (previousTxs.length) {
+    const discovery = tagDiscoveryReview(rows, previousTxs);
+    rows = discovery.transactions;
+  }
+
+  let categories = ensureDiscoveryReviewCategory(
+    Array.isArray(starterCategories) ? [...starterCategories] : []
+  );
   let rules = [];
   if (Array.isArray(starterRuleSpecs) && starterRuleSpecs.length) {
     for (const spec of starterRuleSpecs) {
@@ -2582,6 +2602,7 @@ async function loadBundledDataFile({
 
   const bank = payload.statementSummary;
   const parsed = payload.parsedTotals;
+  const discoveryCount = rows.filter((t) => t.category === DISCOVERY_REVIEW_GROUP).length;
   let msg =
     auto > 0
       ? `สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ · ติดกลุ่มเริ่มต้น ${auto.toLocaleString("th-TH")}`
@@ -2589,14 +2610,25 @@ async function loadBundledDataFile({
   if (parsed?.depositTotal != null && parsed?.withdrawTotal != null) {
     msg += ` · เข้า ${Number(parsed.depositTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })} · ออก ${Number(parsed.withdrawTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
   }
+  if (discoveryCount > 0) {
+    msg += ` · กลุ่ม“${DISCOVERY_REVIEW_GROUP}” ${discoveryCount.toLocaleString("th-TH")} รายการ`;
+  }
   toast(msg);
+  if (discoveryCount > 0) {
+    setTimeout(() => {
+      toast(
+        `ไปตรวจเฉพาะกลุ่ม “${DISCOVERY_REVIEW_GROUP}” (${discoveryCount.toLocaleString("th-TH")} รายการ) — ของที่ค้นเจอเพิ่มหรือแก้ทิศทาง`,
+        { duration: 8000 }
+      );
+    }, 600);
+  }
   if (bank?.incompleteFile) {
     setTimeout(() => {
       toast(
         `ไฟล์ PDF ไม่ครบ ${bank.pageCount}/${bank.pageLabelTotal} หน้า · สรุปธนาคารทั้งชุด (ฝาก ${Number(bank.depositCount).toLocaleString("th-TH")} / ถอน ${Number(bank.withdrawCount).toLocaleString("th-TH")}) จึงยังไม่ตรงจนกว่าจะได้ไฟล์ครบ · ตอนนี้ยอดในแอปเทียบคงเหลือท้ายไฟล์ (${Number(parsed?.lastBalance || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}) ได้แล้ว`,
         { duration: 10000 }
       );
-    }, 700);
+    }, discoveryCount > 0 ? 1400 : 700);
   } else if (
     bank?.depositTotal != null &&
     parsed?.depositTotal != null &&
@@ -2608,7 +2640,16 @@ async function loadBundledDataFile({
         `ยอดในแอปยังไม่เท่าสรุปในสเตทเมนต์ · ฝากธนาคาร ${Number(bank.depositTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })} / แอป ${Number(parsed.depositTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`,
         { duration: 8000 }
       );
-    }, 700);
+    }, discoveryCount > 0 ? 1400 : 700);
+  } else if (
+    bank?.depositTotal != null &&
+    parsed?.depositTotal != null &&
+    Math.abs(bank.depositTotal - parsed.depositTotal) <= 0.05 &&
+    Math.abs(bank.withdrawTotal - parsed.withdrawTotal) <= 0.05
+  ) {
+    setTimeout(() => {
+      toast("ยอดเข้า/ออก ตรงกับสรุปในสเตทเมนต์แล้ว", { duration: 4000 });
+    }, discoveryCount > 0 ? 1400 : 700);
   }
   return project;
 }
@@ -2630,6 +2671,8 @@ async function openPeerlandProject() {
     jsonUrl: "data/peerland_2024-2025.json",
     fileName: "peerland_2024-2025_full.pdf",
     projectName: "peerland_2024-2025",
+    forceReplace: true,
+    matchProject: isPeerlandProjectMeta,
     starterCategories: PEERLAND_CATEGORIES,
     starterRuleSpecs: PEERLAND_PHASE1234_RULES,
     applyStarterRules: true,
@@ -2727,6 +2770,33 @@ function applyTellteaPhases15() {
   );
 }
 
+async function ensurePeerlandProjectSeeded() {
+  const peer = workspace.projects.find(isPeerlandProjectMeta);
+  if (peer) {
+    const txs = Array.isArray(peer.transactions) ? peer.transactions : [];
+    const money = txs.filter((t) => Number(t.amount) > 0);
+    const sumIn = money
+      .filter((t) => t.direction === "in")
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    const sumOut = money
+      .filter((t) => t.direction === "out")
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    // Bank header: ฝาก 1,257 / 11,766,610.62 · ถอน 1,121 / 13,174,786.38
+    const needsReplace =
+      money.length !== 2378 ||
+      Math.abs(sumIn - 11766610.62) > 0.5 ||
+      Math.abs(sumOut - 13174786.38) > 0.5 ||
+      !/peerland_2024-2025_full\.pdf/i.test(String(peer.fileName || ""));
+    if (!needsReplace) return null;
+  }
+  try {
+    return await openPeerlandProject();
+  } catch (err) {
+    console.warn(err);
+    return null;
+  }
+}
+
 async function ensureTellteaProjectSeeded() {
   const telltea = workspace.projects.find(isTellteaProjectMeta);
   if (telltea) {
@@ -2734,11 +2804,19 @@ async function ensureTellteaProjectSeeded() {
     const dates = txs.map((t) => t.date).filter(Boolean).sort();
     const last = dates[dates.length - 1] || "";
     const first = dates[0] || "";
-    const money = txs.filter((t) => Number(t.amount) > 0).length;
-    // Replace incomplete / mis-parsed milk-tea data (expect ~3730 money rows on 135-page file)
+    const money = txs.filter((t) => Number(t.amount) > 0);
+    const sumIn = money
+      .filter((t) => t.direction === "in")
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    const sumOut = money
+      .filter((t) => t.direction === "out")
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    // Replace incomplete / mis-parsed milk-tea data (135-page file → 3,730 money rows)
     const needsReplace =
       txs.length < 3000 ||
-      money < 3700 ||
+      money.length < 3730 ||
+      Math.abs(sumIn - 7438960.28) > 1 ||
+      Math.abs(sumOut - 7341125.91) > 1 ||
       first > "2024-01-01" ||
       last < "2025-12-06" ||
       !/telltea_2024-2025_full\.pdf/i.test(String(telltea.fileName || ""));
@@ -2979,6 +3057,7 @@ async function setupAuth() {
       renderTable();
       await runPendingLoads();
       recoverMergedImports({ silent: true });
+      await ensurePeerlandProjectSeeded();
       await ensureTellteaProjectSeeded();
     });
   } catch (err) {

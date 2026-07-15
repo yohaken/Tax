@@ -1,3 +1,5 @@
+import { DISCOVERY_REVIEW_GROUP } from "./discovery-review.js";
+
 /**
  * Telltea (เทลที) shop grouping — Phases 1–5
  *
@@ -46,6 +48,7 @@ export const TELLTEA_PHASE5_CATEGORIES = [
 ];
 
 export const TELLTEA_CATEGORIES = [
+  DISCOVERY_REVIEW_GROUP,
   ...TELLTEA_PHASE1_CATEGORIES,
   ...TELLTEA_PHASE2_CATEGORIES,
   ...TELLTEA_PHASE3_CATEGORIES,
