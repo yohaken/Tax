@@ -297,10 +297,64 @@ function extractMoneys(line) {
     .filter((n) => n != null && Math.abs(n) >= 0.01);
 }
 
+/** KBank single-column amount: direction comes from the verb, not the channel. */
+function looksLikeDebit(text) {
+  // Payments / transfers out — must beat channel tokens like "K SHOP" / "EDC"
+  if (/เพื่อชำระ|หักบัญชี|ชำระด้วยบัตร|ถอนเงิน|ค่าธรรมเนียม/i.test(text)) return true;
+  if (/ชำระเงิน/i.test(text) && !/รับเงิน|รับโอน/i.test(text)) return true;
+  // Plain "โอนเงิน" is debit; "รับโอนเงิน…" is credit
+  if (/โอนเงิน/i.test(text) && !/รับโอน/i.test(text)) return true;
+  return false;
+}
+
 function looksLikeCredit(text) {
-  return /รับโอน|รับเงิน|เงินเข้า|ฝาก|credit|salary|เงินเดือน|ขายด้วย|thai\s*qr|thai\s*edc|my\s*qr|k\s*shop/i.test(
+  if (looksLikeDebit(text)) return false;
+  return /รับโอน|รับเงิน|รับดอกเบี้ย|เงินเข้า|ฝากเงิน|(?:^|[\s])ฝาก(?:[\s]|$)|credit|salary|เงินเดือน|ขายด้วย/i.test(
     text
   );
+}
+
+function extractTxTime(text) {
+  const m = normalizeText(text).match(/\b(\d{2}:\d{2})\b/);
+  return m ? m[1] : "";
+}
+
+/**
+ * Flip/fill direction using consecutive balances when the verb was ambiguous.
+ * Assumes statement order (already chronological in PDF line order).
+ */
+export function reconcileDirectionsFromBalances(transactions) {
+  const out = transactions.map((t) => ({ ...t }));
+  let fixed = 0;
+  for (let i = 1; i < out.length; i += 1) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (cur.amount == null || cur.amount <= 0) continue;
+    if (prev.balance == null || cur.balance == null) continue;
+    // Skip when prior row is non-movement (ยอดยกมา) still has balance — OK to use
+    const delta = Number((cur.balance - prev.balance).toFixed(2));
+    let inferred = null;
+    if (Math.abs(delta - cur.amount) < 0.021) inferred = "in";
+    else if (Math.abs(delta + cur.amount) < 0.021) inferred = "out";
+    if (!inferred || inferred === cur.direction) continue;
+    if (inferred === "in") {
+      out[i] = {
+        ...cur,
+        credit: cur.amount,
+        debit: null,
+        direction: "in",
+      };
+    } else {
+      out[i] = {
+        ...cur,
+        credit: null,
+        debit: cur.amount,
+        direction: "out",
+      };
+    }
+    fixed += 1;
+  }
+  return { transactions: out, fixed };
 }
 
 export function parsePdfLines(lines, fileName) {
@@ -362,7 +416,10 @@ export function parsePdfLines(lines, fileName) {
       source: fileName,
       raw: text,
     });
-    if (tx) txs.push(tx);
+    if (tx) {
+      tx.time = extractTxTime(text);
+      txs.push(tx);
+    }
   }
   return txs;
 }
@@ -404,7 +461,8 @@ export async function parseFile(file) {
 
   if (lower.endsWith(".pdf") || file.type === "application/pdf") {
     const lines = await extractPdfTextLines(new Uint8Array(buffer));
-    return parsePdfLines(lines, name);
+    const rows = parsePdfLines(lines, name);
+    return reconcileDirectionsFromBalances(dedupeTransactions(rows)).transactions;
   }
 
   if (lower.endsWith(".csv") || file.type === "text/csv") {
@@ -429,7 +487,17 @@ export function dedupeTransactions(list) {
   const seen = new Set();
   const out = [];
   for (const tx of list) {
-    const key = [tx.date, tx.description, tx.credit ?? "", tx.debit ?? "", tx.amount].join("|");
+    // Include balance + time so same-day same-amount QR / transfers stay distinct
+    const key = [
+      tx.date,
+      tx.time || extractTxTime(tx.raw || ""),
+      tx.description,
+      tx.credit ?? "",
+      tx.debit ?? "",
+      tx.amount,
+      tx.balance ?? "",
+      tx.raw || "",
+    ].join("|");
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(tx);

@@ -226,11 +226,12 @@ function paintBuildStamp() {
   }
 }
 
-function toast(message) {
+function toast(message, opts = {}) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => els.toast.classList.remove("show"), 2400);
+  const ms = Number(opts.duration) > 0 ? Number(opts.duration) : 2400;
+  toast._t = setTimeout(() => els.toast.classList.remove("show"), ms);
 }
 
 function printMoney(n) {
@@ -2578,11 +2579,37 @@ async function loadBundledDataFile({
   schedulePersist();
   renderProjectSelect();
   renderTable();
-  toast(
+
+  const bank = payload.statementSummary;
+  const parsed = payload.parsedTotals;
+  let msg =
     auto > 0
       ? `สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ · ติดกลุ่มเริ่มต้น ${auto.toLocaleString("th-TH")}`
-      : `สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ`
-  );
+      : `สร้างโปรเจกต์ “${project.name}” · ${rows.length.toLocaleString("th-TH")} รายการ`;
+  if (parsed?.depositTotal != null && parsed?.withdrawTotal != null) {
+    msg += ` · เข้า ${Number(parsed.depositTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })} · ออก ${Number(parsed.withdrawTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+  }
+  toast(msg);
+  if (bank?.incompleteFile) {
+    setTimeout(() => {
+      toast(
+        `ไฟล์ PDF ไม่ครบ ${bank.pageCount}/${bank.pageLabelTotal} หน้า · สรุปธนาคารทั้งชุด (ฝาก ${Number(bank.depositCount).toLocaleString("th-TH")} / ถอน ${Number(bank.withdrawCount).toLocaleString("th-TH")}) จึงยังไม่ตรงจนกว่าจะได้ไฟล์ครบ · ตอนนี้ยอดในแอปเทียบคงเหลือท้ายไฟล์ (${Number(parsed?.lastBalance || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}) ได้แล้ว`,
+        { duration: 10000 }
+      );
+    }, 700);
+  } else if (
+    bank?.depositTotal != null &&
+    parsed?.depositTotal != null &&
+    (Math.abs(bank.depositTotal - parsed.depositTotal) > 0.05 ||
+      Math.abs(bank.withdrawTotal - parsed.withdrawTotal) > 0.05)
+  ) {
+    setTimeout(() => {
+      toast(
+        `ยอดในแอปยังไม่เท่าสรุปในสเตทเมนต์ · ฝากธนาคาร ${Number(bank.depositTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })} / แอป ${Number(parsed.depositTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`,
+        { duration: 8000 }
+      );
+    }, 700);
+  }
   return project;
 }
 
@@ -2707,9 +2734,11 @@ async function ensureTellteaProjectSeeded() {
     const dates = txs.map((t) => t.date).filter(Boolean).sort();
     const last = dates[dates.length - 1] || "";
     const first = dates[0] || "";
-    // Replace old milk-tea / incomplete statement with full 01-01-24 → 06-12-25 once
+    const money = txs.filter((t) => Number(t.amount) > 0).length;
+    // Replace incomplete / mis-parsed milk-tea data (expect ~3730 money rows on 135-page file)
     const needsReplace =
       txs.length < 3000 ||
+      money < 3700 ||
       first > "2024-01-01" ||
       last < "2025-12-06" ||
       !/telltea_2024-2025_full\.pdf/i.test(String(telltea.fileName || ""));

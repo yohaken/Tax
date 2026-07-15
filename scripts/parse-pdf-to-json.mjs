@@ -8,12 +8,13 @@ const require = createRequire(import.meta.url);
 const pdfjsPath = path.dirname(require.resolve("pdfjs-dist/package.json"));
 const pdfjs = await import(pathToFileURL(path.join(pdfjsPath, "build/pdf.mjs")).href);
 
-// Import TaxTag PDF line parser pieces by duplicating light logic via dynamic import of browser module with mocks is hard.
-// So we extract lines then reuse parsePdfLines from public/js/parser.js via temporary patch of import.
 const parserUrl = pathToFileURL(path.resolve("public/js/parser.js")).href;
-
-// Parser imports nothing for parsePdfLines/extract - but extractPdfTextLines uses CDN. We'll extract here and call parsePdfLines.
-const { parsePdfLines, dedupeTransactions } = await import(parserUrl);
+const {
+  parsePdfLines,
+  dedupeTransactions,
+  reconcileDirectionsFromBalances,
+  parseMoney,
+} = await import(parserUrl);
 
 async function extractLines(buffer) {
   const doc = await pdfjs.getDocument({ data: buffer, useSystemFonts: true }).promise;
@@ -40,7 +41,58 @@ async function extractLines(buffer) {
     }
   }
   await doc.destroy?.();
-  return lines;
+  return { lines, numPages: doc.numPages };
+}
+
+function extractStatementSummary(lines, numPages) {
+  const summary = {
+    pageCount: numPages,
+    pageLabelMax: null,
+    pageLabelTotal: null,
+    closingBalance: null,
+    withdrawCount: null,
+    withdrawTotal: null,
+    depositCount: null,
+    depositTotal: null,
+    periodFrom: null,
+    periodTo: null,
+    incompleteFile: false,
+  };
+  for (const line of lines) {
+    const t = String(line || "");
+    let m = t.match(/หน้าที่\s*\(PAGE\/OF\)\s*(\d+)\s*\/\s*(\d+)/i);
+    if (m) {
+      const cur = Number(m[1]);
+      const total = Number(m[2]);
+      if (summary.pageLabelMax == null || cur > summary.pageLabelMax) summary.pageLabelMax = cur;
+      summary.pageLabelTotal = total;
+    }
+    m = t.match(/ยอดยกไป\s+([\d,]+\.\d{2})/);
+    if (m) summary.closingBalance = parseMoney(m[1]);
+    m = t.match(/รวมถอนเงิน\s+([\d,]+)\s+รายการ\s+([\d,]+\.\d{2})/);
+    if (m) {
+      summary.withdrawCount = Number(String(m[1]).replace(/,/g, ""));
+      summary.withdrawTotal = parseMoney(m[2]);
+    }
+    m = t.match(/รวมฝากเงิน\s+([\d,]+)\s+รายการ\s+([\d,]+\.\d{2})/);
+    if (m) {
+      summary.depositCount = Number(String(m[1]).replace(/,/g, ""));
+      summary.depositTotal = parseMoney(m[2]);
+    }
+    m = t.match(/รอบระหว่างวันที่\s+(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/);
+    if (m) {
+      summary.periodFrom = m[1];
+      summary.periodTo = m[2];
+    }
+  }
+  if (
+    summary.pageLabelTotal &&
+    summary.pageCount &&
+    summary.pageCount < summary.pageLabelTotal
+  ) {
+    summary.incompleteFile = true;
+  }
+  return summary;
 }
 
 const pdfPath = process.argv[2] || "public/telltea_2024-2025_full.pdf";
@@ -48,19 +100,51 @@ const outPath = process.argv[3] || "public/data/telltea_2024-2025.json";
 const fileName = path.basename(pdfPath);
 const buffer = new Uint8Array(fs.readFileSync(pdfPath));
 console.log("pages extract…", pdfPath, buffer.byteLength);
-const lines = await extractLines(buffer);
-console.log("lines", lines.length);
+const { lines, numPages } = await extractLines(buffer);
+console.log("pages", numPages, "lines", lines.length);
+const statementSummary = extractStatementSummary(lines, numPages);
+console.log("statement summary", statementSummary);
+
 let txs = parsePdfLines(lines, fileName);
 txs = dedupeTransactions(txs);
+const reconciled = reconcileDirectionsFromBalances(txs);
+txs = reconciled.transactions;
+console.log("direction fixes from balance", reconciled.fixed);
 console.log("transactions", txs.length);
+
+const money = txs.filter((t) => t.amount > 0);
+const inns = money.filter((t) => t.direction === "in");
+const outs = money.filter((t) => t.direction === "out");
+const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
+const parsed = {
+  movementCount: money.length,
+  depositCount: inns.length,
+  depositTotal: Number(sum(inns).toFixed(2)),
+  withdrawCount: outs.length,
+  withdrawTotal: Number(sum(outs).toFixed(2)),
+  lastBalance: money.filter((t) => t.balance != null).slice(-1)[0]?.balance ?? null,
+};
+console.log("parsed totals", parsed);
+if (statementSummary.depositTotal != null) {
+  console.log(
+    "delta vs statement header",
+    "in",
+    parsed.depositCount - statementSummary.depositCount,
+    (parsed.depositTotal - statementSummary.depositTotal).toFixed(2),
+    "out",
+    parsed.withdrawCount - statementSummary.withdrawCount,
+    (parsed.withdrawTotal - statementSummary.withdrawTotal).toFixed(2)
+  );
+}
+
 const payload = {
   source: fileName,
   generatedAt: new Date().toISOString(),
   count: txs.length,
+  statementSummary,
+  parsedTotals: parsed,
   transactions: txs,
 };
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(payload));
-// also write a sample of first lines for debug
-fs.writeFileSync(outPath.replace(/\.json$/, ".lines.txt"), lines.slice(0, 80).join("\n"));
 console.log("wrote", outPath);
