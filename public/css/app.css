@@ -620,7 +620,7 @@ body.is-row-dragging .tx-table td {
 @media print {
   @page {
     size: A4;
-    margin: 8mm 7mm;
+    margin: 10mm 9mm;
   }
   html, body {
     height: auto !important;
@@ -726,6 +726,93 @@ body.is-row-dragging .tx-table td {
     font-size: 7pt;
   }
   .print-root.print-compact .print-statement tr {
+    page-break-inside: avoid;
+  }
+
+  /* —— Overview summary print: larger, centered, no column collapse —— */
+  .print-root.print-overview-sheet {
+    display: block !important;
+  }
+  .print-root.print-overview-sheet .print-sheet {
+    width: 100%;
+    max-width: 186mm;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+  .print-root.print-overview-sheet .print-head {
+    margin: 0 0 8pt;
+    padding: 0 0 6pt;
+    border-bottom: 1pt solid #222;
+    text-align: center;
+  }
+  .print-root.print-overview-sheet .print-title {
+    font-size: 14pt;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    margin: 0;
+    line-height: 1.25;
+  }
+  .print-root.print-overview-sheet .print-meta {
+    margin: 3pt 0 0;
+    color: #333;
+    font-size: 9pt;
+    font-weight: 500;
+    line-height: 1.35;
+  }
+  .print-root.print-overview-sheet .print-statement {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 10pt;
+    line-height: 1.3;
+  }
+  .print-root.print-overview-sheet .print-statement th,
+  .print-root.print-overview-sheet .print-statement td {
+    border-bottom: 0.5pt solid #bbb;
+    padding: 4pt 5pt;
+    text-align: left;
+    vertical-align: top;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .print-root.print-overview-sheet .print-statement th {
+    font-size: 8.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #222;
+    border-bottom: 1pt solid #222;
+    padding-bottom: 4pt;
+    white-space: nowrap;
+  }
+  .print-root.print-overview-sheet .print-overview .gname {
+    width: 28%;
+    white-space: normal !important;
+    overflow: visible;
+    word-break: break-word;
+    font-weight: 600;
+  }
+  .print-root.print-overview-sheet .print-overview .n {
+    width: 26%;
+    white-space: normal !important;
+    overflow: visible;
+    line-height: 1.3;
+    word-break: break-word;
+  }
+  .print-root.print-overview-sheet .print-overview .num {
+    width: 11.5%;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .print-root.print-overview-sheet .print-statement tfoot td {
+    border-top: 1pt solid #222;
+    border-bottom: 0;
+    font-weight: 700;
+    padding-top: 5pt;
+    font-size: 10pt;
+  }
+  .print-root.print-overview-sheet .print-statement tr {
     page-break-inside: avoid;
   }
 }
