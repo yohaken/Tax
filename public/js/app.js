@@ -1996,11 +1996,13 @@ function buildStatementRowsHtml(rows, { includeGroup = false } = {}) {
     .join("");
 }
 
-function runPrint(html) {
+function runPrint(html, opts = {}) {
   if (!els.printRoot) return;
   els.printRoot.hidden = false;
-  els.printRoot.className = "print-root print-compact";
-  els.printRoot.innerHTML = html;
+  const mode = opts.mode === "overview" ? "print-overview-sheet" : "print-compact";
+  els.printRoot.className = `print-root ${mode}`;
+  els.printRoot.innerHTML =
+    opts.mode === "overview" ? `<div class="print-sheet">${html}</div>` : html;
   // next frame so layout settles before print (avoids blank trailing page)
   requestAnimationFrame(() => {
     window.print();
@@ -2144,7 +2146,8 @@ function printOverview() {
   const bounds = dataDateBounds(base);
   const printedAt = formatDateTh(new Date().toISOString().slice(0, 10));
 
-  runPrint(`
+  runPrint(
+    `
     <header class="print-head">
       <div class="print-title">TaxTag · สรุปตามกลุ่ม</div>
       <div class="print-meta">${escapeHtml(state.projectName || "—")}
@@ -2171,7 +2174,7 @@ function printOverview() {
           .map((g) => {
             const gNote = String(state.groupNotes?.[g.key] || "").trim();
             return `<tr>
-              <td class="gname" title="${escapeHtml(displayGroupName(g))}">${escapeHtml(displayGroupName(g))}</td>
+              <td class="gname">${escapeHtml(displayGroupName(g))}</td>
               <td class="num">${g.count.toLocaleString("th-TH")}</td>
               <td class="num">${escapeHtml(printMoneySlim(g.sumIn))}</td>
               <td class="num">${escapeHtml(printMoneySlim(g.sumOut))}</td>
@@ -2192,7 +2195,9 @@ function printOverview() {
         </tr>
       </tfoot>
     </table>
-  `);
+  `,
+    { mode: "overview" }
+  );
 }
 
 function printSelectedGroups() {
