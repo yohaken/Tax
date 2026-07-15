@@ -33,14 +33,11 @@ const PROJECT_DEFAULTS = {
   messagingSenderId: "470549580687",
 };
 
-/** Marks that we left this tab for Google OAuth redirect (survives return navigation). */
 const OAUTH_REDIRECT_FLAG = "taxtag-oauth-redirect";
 
 let app = null;
 export let auth = null;
 export let db = null;
-
-/** Last redirect-completion error (cleared when read). */
 let lastRedirectError = null;
 
 function isMobile() {
@@ -50,7 +47,6 @@ function isMobile() {
   );
 }
 
-/** Drop blank fields that Firebase SDK rejects (e.g. databaseURL: ""). */
 function sanitizeConfig(raw) {
   const out = {};
   for (const [key, value] of Object.entries(raw || {})) {
@@ -62,9 +58,9 @@ function sanitizeConfig(raw) {
 }
 
 /**
- * Always use the Firebase default authDomain (*.firebaseapp.com).
- * Using taxtag.web.app here causes Google redirect_uri_mismatch — that handler URI
- * is not registered on the OAuth client (verified via live E2E).
+ * Keep Firebase default authDomain — only
+ * https://mypeer-501909.firebaseapp.com/__/auth/handler is registered
+ * on the Google OAuth client. taxtag.web.app URIs → redirect_uri_mismatch.
  */
 export function resolveAuthDomain() {
   return PROJECT_DEFAULTS.authDomain;
@@ -102,17 +98,35 @@ function hasFirebasePendingRedirect() {
   }
 }
 
-/**
- * Always finish redirect-based Google sign-in on load.
- * Mobile Safari often returns with an empty document.referrer, so heuristics that
- * skip getRedirectResult leave the user stuck on the login gate.
- */
+function assertAllowedEmail(user) {
+  const email = (user?.email || "").toLowerCase();
+  if (email !== ALLOWED_EMAIL.toLowerCase()) {
+    const denied = new Error(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
+    denied.code = "auth/email-not-allowed";
+    throw denied;
+  }
+  return user;
+}
+
 async function completeRedirectSignIn() {
   lastRedirectError = null;
   const expected = wasOAuthRedirectPending() || hasFirebasePendingRedirect();
   try {
     const result = await getRedirectResult(auth, browserPopupRedirectResolver);
     clearOAuthRedirectPending();
+    if (result?.user) {
+      try {
+        assertAllowedEmail(result.user);
+      } catch (err) {
+        await signOut(auth);
+        lastRedirectError = err;
+        return null;
+      }
+    } else if (expected) {
+      lastRedirectError = new Error(
+        "กลับจาก Google แล้วแต่เซสชันไม่ติด — ลองกดล็อกอินอีกครั้ง (ใช้หน้าต่างป๊อปอัป)"
+      );
+    }
     return result;
   } catch (err) {
     clearOAuthRedirectPending();
@@ -123,7 +137,6 @@ async function completeRedirectSignIn() {
   }
 }
 
-/** Consume and clear the last redirect error for UI messaging. */
 export function takeRedirectError() {
   const err = lastRedirectError;
   lastRedirectError = null;
@@ -141,12 +154,10 @@ export async function initFirebase() {
     /* non-Firebase hosting */
   }
   config = sanitizeConfig(config);
-  config.authDomain = resolveAuthDomain();
+  config.authDomain = PROJECT_DEFAULTS.authDomain;
 
   app = initializeApp(config);
 
-  // Prefer initializeAuth with popupRedirectResolver —
-  // missing resolver causes auth/argument-error on signInWithPopup.
   try {
     auth = initializeAuth(app, {
       persistence: [indexedDBLocalPersistence, browserLocalPersistence],
@@ -167,7 +178,6 @@ export async function initFirebase() {
   }
 
   db = getFirestore(app);
-
   await completeRedirectSignIn();
   return { auth, db };
 }
@@ -177,7 +187,6 @@ export function watchAuth(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-/** Resolves when the first persisted auth state has been restored from IndexedDB/local. */
 export async function waitAuthReady() {
   if (!auth) await initFirebase();
   if (typeof auth.authStateReady === "function") {
@@ -186,12 +195,30 @@ export async function waitAuthReady() {
   return auth.currentUser || null;
 }
 
+async function startPopupLogin(provider) {
+  const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+  try {
+    assertAllowedEmail(result.user);
+  } catch (err) {
+    await signOut(auth);
+    throw err;
+  }
+  return result.user;
+}
+
 async function startRedirectLogin(provider) {
   markOAuthRedirectPending();
   await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
   return null;
 }
 
+/**
+ * Mobile must use popup first.
+ * signInWithRedirect returns without a session on Safari/Chrome that block
+ * third-party storage when authDomain ≠ taxtag.web.app — and switching
+ * authDomain to taxtag.web.app causes redirect_uri_mismatch (handler URI
+ * not registered on the Google OAuth client).
+ */
 export async function loginWithGoogle() {
   if (!auth) await initFirebase();
   if (!auth) throw new Error("Firebase ยังไม่พร้อม");
@@ -199,60 +226,46 @@ export async function loginWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.addScope("email");
   provider.addScope("profile");
+  provider.setCustomParameters({ prompt: "select_account", login_hint: ALLOWED_EMAIL });
 
-  let result;
   try {
-    // Mobile browsers (esp. iOS Safari) block popups — use full-page redirect.
-    if (isMobile()) {
-      return await startRedirectLogin(provider);
-    }
-    result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+    return await startPopupLogin(provider);
   } catch (err) {
     const code = err?.code || "";
+    if (code === "auth/email-not-allowed") throw err;
     if (
       code === "auth/popup-blocked" ||
       code === "auth/popup-closed-by-user" ||
-      code === "auth/cancelled-popup-request"
+      code === "auth/cancelled-popup-request" ||
+      code === "auth/argument-error"
     ) {
-      return await startRedirectLogin(provider);
-    }
-    if (code === "auth/argument-error") {
-      // Retry the simplest supported path.
+      // Last resort — often fails on Safari ITP but better than doing nothing.
       try {
-        result = await signInWithPopup(auth, new GoogleAuthProvider());
+        if (code === "auth/argument-error") {
+          return await startPopupLogin(new GoogleAuthProvider());
+        }
       } catch {
-        return await startRedirectLogin(new GoogleAuthProvider());
+        /* fall through to redirect */
       }
-    } else {
-      throw err;
+      return await startRedirectLogin(code === "auth/argument-error" ? new GoogleAuthProvider() : provider);
     }
+    throw err;
   }
-
-  const email = (result.user?.email || "").toLowerCase();
-  if (email !== ALLOWED_EMAIL.toLowerCase()) {
-    await signOut(auth);
-    const denied = new Error(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
-    denied.code = "auth/email-not-allowed";
-    throw denied;
-  }
-  return result.user;
 }
 
 export async function logoutFirebase() {
   await signOut(auth);
 }
 
-/** Test / recovery helper — exchange a Firebase custom token for a real session. */
 export async function loginWithCustomToken(token) {
   if (!auth) await initFirebase();
   if (!auth) throw new Error("Firebase ยังไม่พร้อม");
   const cred = await signInWithCustomToken(auth, token);
-  const email = (cred.user?.email || "").toLowerCase();
-  if (email && email !== ALLOWED_EMAIL.toLowerCase()) {
+  try {
+    assertAllowedEmail(cred.user);
+  } catch (err) {
     await signOut(auth);
-    const denied = new Error(`อนุญาตเฉพาะ ${ALLOWED_EMAIL}`);
-    denied.code = "auth/email-not-allowed";
-    throw denied;
+    throw err;
   }
   return cred.user;
 }

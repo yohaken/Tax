@@ -3578,28 +3578,33 @@ function wireEvents() {
     toast(`Export XLSX · ${rows.length.toLocaleString("th-TH")} รายการ`);
   });
 
-  async function handleAuthClick() {
-    try {
-      if (currentUser) {
-        writeAuthHint(null);
-        authOptimistic = false;
-        currentUser = null;
-        authReady = true;
-        updateAuthButton();
-        renderTable();
-        await logoutFirebase();
-        toast("ออกจากระบบแล้ว");
-        return;
-      }
-      const user = await loginWithGoogle();
-      if (user) {
-        writeAuthHint(user);
-        toast("เข้าสู่ระบบแล้ว · จำเซสชันในเครื่องนี้ไว้ จะไม่ถามบ่อย");
-      } else toast("กำลังเปิดหน้าล็อกอิน Google…");
-    } catch (err) {
-      console.error(err);
-      toast(`${err.message || "ล็อกอินไม่สำเร็จ"} · ${buildLabel()}`);
+  function handleAuthClick() {
+    if (currentUser) {
+      writeAuthHint(null);
+      authOptimistic = false;
+      currentUser = null;
+      authReady = true;
+      updateAuthButton();
+      renderTable();
+      void logoutFirebase()
+        .then(() => toast("ออกจากระบบแล้ว"))
+        .catch((err) => toast(err.message || "ออกจากระบบไม่สำเร็จ"));
+      return;
     }
+    // Start Google login in the same turn as the tap so iOS allows the popup.
+    toast("กำลังเปิดหน้าต่าง Google…");
+    const loginPromise = loginWithGoogle();
+    void loginPromise
+      .then((user) => {
+        if (user) {
+          writeAuthHint(user);
+          toast("เข้าสู่ระบบแล้ว · จำเซสชันในเครื่องนี้ไว้ จะไม่ถามบ่อย");
+        } else toast("กำลังเปิดหน้าล็อกอิน Google…");
+      })
+      .catch((err) => {
+        console.error(err);
+        toast(`${err.message || "ล็อกอินไม่สำเร็จ"} · ${buildLabel()}`);
+      });
   }
 
   els.btnAuth?.addEventListener("click", handleAuthClick);
