@@ -47,7 +47,9 @@ import {
   DISCOVERY_REVIEW_GROUP,
   tagDiscoveryReview,
   ensureDiscoveryReviewCategory,
+  mergeBundledIntoLocal,
 } from "./discovery-review.js";
+import { uid } from "./parser.js";
 
 const workspace = loadWorkspace();
 const state = loadState();
@@ -2695,24 +2697,107 @@ async function loadBundledDataFile({
   return project;
 }
 
+async function softMergeBundledStatement({
+  project,
+  jsonUrl,
+  fileName,
+  silent = false,
+}) {
+  if (!project) return { added: 0, dirFixed: 0 };
+  const res = await fetch(new URL(jsonUrl, window.location.href));
+  if (!res.ok) throw new Error(`โหลด ${fileName || jsonUrl} ไม่สำเร็จ (${res.status})`);
+  const payload = await res.json();
+  const bundled = Array.isArray(payload.transactions) ? payload.transactions : [];
+  if (!bundled.length) return { added: 0, dirFixed: 0 };
+
+  const beforeCats = new Map(
+    (project.transactions || []).map((t) => [t.id, String(t.category || "").trim()])
+  );
+  const merged = mergeBundledIntoLocal(project.transactions || [], bundled, { makeId: () => uid() });
+  project.transactions = merged.transactions;
+  project.categories = ensureDiscoveryReviewCategory(project.categories || []);
+  project.updatedAt = new Date().toISOString();
+
+  // Safety: never blank out a category that existed before merge
+  for (const t of project.transactions) {
+    const prev = beforeCats.get(t.id);
+    if (prev && !String(t.category || "").trim()) t.category = prev;
+  }
+
+  if (workspace.activeId === project.id) {
+    applyProjectToState(project);
+  }
+  saveState(state, workspace);
+  if (!silent && (merged.added || merged.dirFixed)) {
+    toast(
+      merged.added > 0
+        ? `คงการจัดกลุ่มเดิม · พบใหม่ ${merged.added.toLocaleString("th-TH")} รายการ → “${DISCOVERY_REVIEW_GROUP}”` +
+            (merged.dirFixed ? ` · แก้ทิศทางเงียบๆ ${merged.dirFixed.toLocaleString("th-TH")}` : "")
+        : `คงการจัดกลุ่มเดิม · แก้ทิศทาง ${merged.dirFixed.toLocaleString("th-TH")} รายการ (ไม่ย้ายกลุ่ม)`
+    );
+  }
+  return merged;
+}
+
 async function openTellteaProject() {
+  const existing = workspace.projects.find(isTellteaProjectMeta);
+  if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
+    if (!requireLogin()) return null;
+    syncActiveFromState();
+    applyProjectToState(existing);
+    clearSessionUi();
+    try {
+      await softMergeBundledStatement({
+        project: existing,
+        jsonUrl: "data/telltea_2024-2025.json",
+        fileName: "telltea_2024-2025_full.pdf",
+      });
+    } catch (err) {
+      console.warn(err);
+    }
+    schedulePersist();
+    renderProjectSelect();
+    renderTable();
+    toast(`เปิด “${existing.name}” · คงการจัดกลุ่มเดิม`);
+    return existing;
+  }
   return loadBundledDataFile({
     jsonUrl: "data/telltea_2024-2025.json",
     fileName: "telltea_2024-2025_full.pdf",
     projectName: "telltea_2024-2025",
-    // Replace any old milk-tea / telltea project with this statement
-    forceReplace: true,
+    forceReplace: false,
     matchProject: isTellteaProjectMeta,
     starterCategories: TELLTEA_CATEGORIES,
   });
 }
 
 async function openPeerlandProject() {
+  const existing = workspace.projects.find(isPeerlandProjectMeta);
+  if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
+    if (!requireLogin()) return null;
+    syncActiveFromState();
+    applyProjectToState(existing);
+    clearSessionUi();
+    try {
+      await softMergeBundledStatement({
+        project: existing,
+        jsonUrl: "data/peerland_2024-2025.json",
+        fileName: "peerland_2024-2025_full.pdf",
+      });
+    } catch (err) {
+      console.warn(err);
+    }
+    schedulePersist();
+    renderProjectSelect();
+    renderTable();
+    toast(`เปิด “${existing.name}” · คงการจัดกลุ่มเดิม`);
+    return existing;
+  }
   return loadBundledDataFile({
     jsonUrl: "data/peerland_2024-2025.json",
     fileName: "peerland_2024-2025_full.pdf",
     projectName: "peerland_2024-2025",
-    forceReplace: true,
+    forceReplace: false,
     matchProject: isPeerlandProjectMeta,
     starterCategories: PEERLAND_CATEGORIES,
     starterRuleSpecs: PEERLAND_PHASE1234_RULES,
@@ -2814,21 +2899,18 @@ function applyTellteaPhases15() {
 async function ensurePeerlandProjectSeeded() {
   const peer = workspace.projects.find(isPeerlandProjectMeta);
   if (peer) {
-    const txs = Array.isArray(peer.transactions) ? peer.transactions : [];
-    const money = txs.filter((t) => Number(t.amount) > 0);
-    const sumIn = money
-      .filter((t) => t.direction === "in")
-      .reduce((s, t) => s + Number(t.amount || 0), 0);
-    const sumOut = money
-      .filter((t) => t.direction === "out")
-      .reduce((s, t) => s + Number(t.amount || 0), 0);
-    // Bank header: ฝาก 1,257 / 11,766,610.62 · ถอน 1,121 / 13,174,786.38
-    const needsReplace =
-      money.length !== 2378 ||
-      Math.abs(sumIn - 11766610.62) > 0.5 ||
-      Math.abs(sumOut - 13174786.38) > 0.5 ||
-      !/peerland_2024-2025_full\.pdf/i.test(String(peer.fileName || ""));
-    if (!needsReplace) return null;
+    // Never wipe an existing Peerland project — only append newly found rows.
+    try {
+      await softMergeBundledStatement({
+        project: peer,
+        jsonUrl: "data/peerland_2024-2025.json",
+        fileName: "peerland_2024-2025_full.pdf",
+        silent: true,
+      });
+    } catch (err) {
+      console.warn(err);
+    }
+    return null;
   }
   try {
     return await openPeerlandProject();
@@ -2841,27 +2923,17 @@ async function ensurePeerlandProjectSeeded() {
 async function ensureTellteaProjectSeeded() {
   const telltea = workspace.projects.find(isTellteaProjectMeta);
   if (telltea) {
-    const txs = Array.isArray(telltea.transactions) ? telltea.transactions : [];
-    const dates = txs.map((t) => t.date).filter(Boolean).sort();
-    const last = dates[dates.length - 1] || "";
-    const first = dates[0] || "";
-    const money = txs.filter((t) => Number(t.amount) > 0);
-    const sumIn = money
-      .filter((t) => t.direction === "in")
-      .reduce((s, t) => s + Number(t.amount || 0), 0);
-    const sumOut = money
-      .filter((t) => t.direction === "out")
-      .reduce((s, t) => s + Number(t.amount || 0), 0);
-    // Replace incomplete / mis-parsed milk-tea data (full 140-page file → 3,853 money rows)
-    const needsReplace =
-      txs.length < 3900 ||
-      money.length < 3853 ||
-      Math.abs(sumIn - 7731643.93) > 1 ||
-      Math.abs(sumOut - 7600203.91) > 1 ||
-      first > "2024-01-01" ||
-      last < "2025-12-31" ||
-      !/telltea_2024-2025_full\.pdf/i.test(String(telltea.fileName || ""));
-    if (!needsReplace) return null;
+    try {
+      await softMergeBundledStatement({
+        project: telltea,
+        jsonUrl: "data/telltea_2024-2025.json",
+        fileName: "telltea_2024-2025_full.pdf",
+        silent: true,
+      });
+    } catch (err) {
+      console.warn(err);
+    }
+    return null;
   }
   try {
     return await openTellteaProject();
@@ -3039,12 +3111,15 @@ async function hydrateAfterLogin(user) {
       }
       const localCount = target.transactions?.length || 0;
       const remoteCount = remote.transactions.length;
+      const localTagged = (target.transactions || []).filter((t) => String(t.category || "").trim()).length;
+      const remoteTagged = remote.transactions.filter((t) => String(t.category || "").trim()).length;
       const localMs = Date.parse(target.updatedAt || "") || 0;
       const remoteMs = remoteTimeMs(remote.updatedAt);
+      // Never let a freshly reseeded remote wipe richer local grouping work.
       const preferRemote =
         !localCount ||
-        remoteCount > localCount ||
-        (remoteCount === localCount && remoteMs >= localMs);
+        (remoteCount > localCount && remoteTagged >= localTagged) ||
+        (remoteCount === localCount && remoteMs > localMs && remoteTagged >= localTagged);
       if (preferRemote) {
         target.transactions = remote.transactions;
         if (remote.categories?.length) target.categories = remote.categories;

@@ -30,6 +30,18 @@ function findPreviousMatch(tx, byFp, byLoose) {
   );
 }
 
+function indexTxs(list) {
+  const byFp = new Map();
+  const byLoose = new Map();
+  for (const t of list) {
+    byFp.set(txFingerprint(t), t);
+    const k = txLooseKey(t);
+    if (!byLoose.has(k)) byLoose.set(k, []);
+    byLoose.get(k).push(t);
+  }
+  return { byFp, byLoose };
+}
+
 /**
  * Tag money rows that are brand-new vs a previous statement parse, or whose
  * in/out direction flipped. Leaves already-categorized review tags alone.
@@ -37,13 +49,7 @@ function findPreviousMatch(tx, byFp, byLoose) {
  */
 export function tagDiscoveryReview(transactions, previousTransactions = []) {
   const prev = Array.isArray(previousTransactions) ? previousTransactions : [];
-  const byFp = new Map(prev.map((t) => [txFingerprint(t), t]));
-  const byLoose = new Map();
-  for (const t of prev) {
-    const k = txLooseKey(t);
-    if (!byLoose.has(k)) byLoose.set(k, []);
-    byLoose.get(k).push(t);
-  }
+  const { byFp, byLoose } = indexTxs(prev);
 
   let brandNew = 0;
   let dirFlip = 0;
@@ -77,6 +83,78 @@ export function tagDiscoveryReview(transactions, previousTransactions = []) {
   });
 
   return { transactions: next, tagged, brandNew, dirFlip };
+}
+
+/**
+ * Merge a corrected bank statement into an existing project WITHOUT wiping user work.
+ * - Brand-new rows → “รายการใหม่ที่ค้นเจอ”
+ * - Direction/amount fixes on matched rows → update money fields only; keep category/note
+ */
+export function mergeBundledIntoLocal(localTransactions, bundledTransactions, { makeId } = {}) {
+  const local = Array.isArray(localTransactions) ? localTransactions.map((t) => ({ ...t })) : [];
+  const bundled = Array.isArray(bundledTransactions) ? bundledTransactions : [];
+  const { byFp, byLoose } = indexTxs(local);
+
+  let added = 0;
+  let dirFixed = 0;
+
+  for (const b of bundled) {
+    const isMoney = Number(b.amount) > 0;
+    const isCarry = /ยอดยกมา/i.test(String(b.raw || b.description || ""));
+    if (!isMoney && !isCarry) continue;
+
+    const match = findPreviousMatch(b, byFp, byLoose);
+    if (!match) {
+      const id =
+        typeof makeId === "function"
+          ? makeId()
+          : b.id || `tx_${Math.random().toString(36).slice(2, 10)}`;
+      const row = {
+        ...b,
+        id,
+        category: DISCOVERY_REVIEW_GROUP,
+        note: [String(b.note || "").trim(), "ค้นพบเพิ่มจาก parse ใหม่"].filter(Boolean).join(" · "),
+        discoveryReview: true,
+        discoveryReason: "ค้นพบเพิ่มจาก parse ใหม่",
+      };
+      local.push(row);
+      byFp.set(txFingerprint(row), row);
+      const k = txLooseKey(row);
+      if (!byLoose.has(k)) byLoose.set(k, []);
+      byLoose.get(k).push(row);
+      if (isMoney) added += 1;
+      continue;
+    }
+
+    const idx = local.findIndex((t) => t.id === match.id);
+    if (idx < 0) continue;
+
+    const cur = local[idx];
+    const dirChanged =
+      b.direction &&
+      b.direction !== "unknown" &&
+      cur.direction &&
+      cur.direction !== b.direction;
+    const amountChanged =
+      Math.abs((Number(cur.amount) || 0) - (Number(b.amount) || 0)) > 0.021;
+    if (!dirChanged && !amountChanged) continue;
+
+    // Fix ledger fields only — never steal the user's group assignment
+    local[idx] = {
+      ...cur,
+      direction: b.direction || cur.direction,
+      credit: b.credit,
+      debit: b.debit,
+      amount: b.amount,
+      balance: b.balance ?? cur.balance,
+      time: b.time || cur.time,
+      raw: b.raw || cur.raw,
+      description: b.description || cur.description,
+    };
+    if (dirChanged) dirFixed += 1;
+  }
+
+  return { transactions: local, added, dirFixed };
 }
 
 export function ensureDiscoveryReviewCategory(categories = []) {
