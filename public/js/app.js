@@ -291,7 +291,12 @@ function isPeerlandProject() {
 
 function isTellteaProject() {
   const blob = `${state.fileName || ""} ${state.projectName || ""}`;
-  return /telltea|เทลที/i.test(blob);
+  return /telltea|เทลที|ชานม/i.test(blob);
+}
+
+function isTellteaProjectMeta(p) {
+  const blob = `${p?.fileName || ""} ${p?.name || ""} ${p?.projectSource || ""}`;
+  return /telltea|เทลที|ชานม/i.test(blob);
 }
 
 function displayGroupName(g) {
@@ -2478,20 +2483,49 @@ async function loadBundledDataFile({
   starterRuleSpecs = null,
   applyStarterRules = false,
   applyPhase5Heuristics = false,
+  forceReplace = false,
+  matchProject = null,
 }) {
   if (!requireLogin()) return null;
-  const existing = workspace.projects.find(
-    (p) => p.fileName === fileName || p.name === projectName || p.name === fileStem(fileName)
-  );
-  if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
-    syncActiveFromState();
-    applyProjectToState(existing);
-    clearSessionUi();
-    schedulePersist();
-    renderProjectSelect();
-    renderTable();
-    toast(`เปิดโปรเจกต์ “${existing.name}” ที่มีอยู่แล้ว`);
-    return existing;
+  const matches = (p) => {
+    if (typeof matchProject === "function") return matchProject(p);
+    return p.fileName === fileName || p.name === projectName || p.name === fileStem(fileName);
+  };
+
+  if (forceReplace) {
+    const removed = workspace.projects.filter(matches);
+    if (removed.length) {
+      syncActiveFromState();
+      workspace.projects = workspace.projects.filter((p) => !matches(p));
+      if (removed.some((p) => p.id === workspace.activeId)) {
+        workspace.activeId = workspace.projects[0]?.id || "";
+        if (workspace.projects[0]) applyProjectToState(workspace.projects[0]);
+        else {
+          Object.assign(state, emptyProjectFields());
+          state.transactions = [];
+          state.categories = [];
+          state.rules = [];
+          state.groupNotes = {};
+          state.groupNicknames = {};
+          state.projectName = "โปรเจกต์";
+          state.fileName = "";
+          state.projectId = "";
+        }
+      }
+      toast(`ลบโปรเจกต์เก่า ${removed.length.toLocaleString("th-TH")} ชุดแล้ว · กำลังใส่ไฟล์ใหม่`);
+    }
+  } else {
+    const existing = workspace.projects.find(matches);
+    if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
+      syncActiveFromState();
+      applyProjectToState(existing);
+      clearSessionUi();
+      schedulePersist();
+      renderProjectSelect();
+      renderTable();
+      toast(`เปิดโปรเจกต์ “${existing.name}” ที่มีอยู่แล้ว`);
+      return existing;
+    }
   }
   toast(`กำลังโหลด ${fileName}…`);
   const res = await fetch(new URL(jsonUrl, window.location.href));
@@ -2557,6 +2591,10 @@ async function openTellteaProject() {
     jsonUrl: "data/telltea_2024-2025.json",
     fileName: "telltea_2024-2025_full.pdf",
     projectName: "telltea_2024-2025",
+    // Replace any old milk-tea / telltea project with this statement
+    forceReplace: true,
+    matchProject: isTellteaProjectMeta,
+    starterCategories: TELLTEA_CATEGORIES,
   });
 }
 
@@ -2663,13 +2701,20 @@ function applyTellteaPhases15() {
 }
 
 async function ensureTellteaProjectSeeded() {
-  const exists = workspace.projects.some(
-    (p) =>
-      p.fileName === "telltea_2024-2025_full.pdf" ||
-      p.name === "telltea_2024-2025" ||
-      String(p.fileName || "").includes("telltea")
-  );
-  if (exists) return null;
+  const telltea = workspace.projects.find(isTellteaProjectMeta);
+  if (telltea) {
+    const txs = Array.isArray(telltea.transactions) ? telltea.transactions : [];
+    const dates = txs.map((t) => t.date).filter(Boolean).sort();
+    const last = dates[dates.length - 1] || "";
+    const first = dates[0] || "";
+    // Replace old milk-tea / incomplete statement with full 01-01-24 → 06-12-25 once
+    const needsReplace =
+      txs.length < 3000 ||
+      first > "2024-01-01" ||
+      last < "2025-12-06" ||
+      !/telltea_2024-2025_full\.pdf/i.test(String(telltea.fileName || ""));
+    if (!needsReplace) return null;
+  }
   try {
     return await openTellteaProject();
   } catch (err) {

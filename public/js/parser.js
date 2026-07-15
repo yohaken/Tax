@@ -280,10 +280,27 @@ export function parseCsvText(text, fileName) {
 }
 
 function extractMoneys(line) {
-  const matches = normalizeText(line).match(MONEY_RE) || [];
+  // Strip bank refs that contain long digit runs (not money)
+  const cleaned = normalizeText(line)
+    .replace(/\bKB\d+\b/gi, " ")
+    .replace(/\bX\d+\b/gi, " ")
+    .replace(/\bRef\s*X?\d+\b/gi, " ")
+    .replace(/\bN\d+[A-Z0-9/]*/gi, " ");
+  // Prefer real statement amounts: always have decimals (or thousand separators)
+  const strict = cleaned.match(/-?\d{1,3}(?:,\d{3})+\.\d{2}|-?\d+\.\d{2}/g) || [];
+  if (strict.length) {
+    return strict.map((m) => parseMoney(m)).filter((n) => n != null);
+  }
+  const matches = cleaned.match(MONEY_RE) || [];
   return matches
     .map((m) => parseMoney(m))
     .filter((n) => n != null && Math.abs(n) >= 0.01);
+}
+
+function looksLikeCredit(text) {
+  return /รับโอน|รับเงิน|เงินเข้า|ฝาก|credit|salary|เงินเดือน|ขายด้วย|thai\s*qr|thai\s*edc|my\s*qr|k\s*shop/i.test(
+    text
+  );
 }
 
 export function parsePdfLines(lines, fileName) {
@@ -292,27 +309,47 @@ export function parsePdfLines(lines, fileName) {
     const text = normalizeText(line);
     if (!text || text.length < 8) continue;
     if (rowLooksLikeHeader([text])) continue;
+    // Period headers / page chrome — not ledger rows
+    if (/รอบระหว่างวันที่|ช่วงวันที่|statement\s*period/i.test(text)) continue;
     if (!DATE_RE.test(text)) continue;
 
     const date = parseDateFlexible(text);
+    if (!date) continue;
+
     const moneys = extractMoneys(text);
-    if (!date || moneys.length === 0) continue;
 
     // Drop the date token from description
     let description = text.replace(DATE_RE, " ").replace(MONEY_RE, " ");
     description = normalizeText(description).replace(/\s*[|·]\s*/g, " ");
     if (!description) description = text;
 
+    // Brought-forward balance lines: keep for date span, never as cash-out
+    if (/ยอดยกมา/i.test(text)) {
+      const balance = moneys.length ? moneys[moneys.length - 1] : null;
+      const tx = makeTx({
+        date,
+        description: "ยอดยกมา",
+        credit: null,
+        debit: null,
+        balance,
+        source: fileName,
+        raw: text,
+      });
+      if (tx) txs.push(tx);
+      continue;
+    }
+
+    if (moneys.length === 0) continue;
+
     let credit = null;
     let debit = null;
     if (moneys.length === 1) {
-      // Ambiguous: assume outflow for common "transfer" tokens, else leave as out if no "รับ"
-      if (/รับโอน|เงินเข้า|ฝาก|credit|salary|เงินเดือน/i.test(text)) credit = moneys[0];
+      if (looksLikeCredit(text)) credit = moneys[0];
       else debit = moneys[0];
     } else {
-      // last is often balance; previous may be amount
-      const amountCandidate = moneys.length >= 2 ? moneys[moneys.length - 2] : moneys[0];
-      if (/รับโอน|เงินเข้า|ฝาก|credit|salary|เงินเดือน/i.test(text)) credit = amountCandidate;
+      // last is often balance; previous is the amount
+      const amountCandidate = moneys[moneys.length - 2];
+      if (looksLikeCredit(text)) credit = amountCandidate;
       else debit = amountCandidate;
     }
 
