@@ -37,6 +37,11 @@ import {
   applyPeerlandPhasesAll,
   applyPeerlandPhase5Heuristics,
 } from "./peerland-phases.js";
+import {
+  TELLTEA_CATEGORIES,
+  TELLTEA_PHASE_META,
+  applyTellteaPhasesAll,
+} from "./telltea-phases.js";
 
 const workspace = loadWorkspace();
 const state = loadState();
@@ -176,6 +181,7 @@ const els = {
   btnOpenTelltea: document.getElementById("btn-open-telltea"),
   btnOpenPeerland: document.getElementById("btn-open-peerland"),
   btnPeerlandPhases: document.getElementById("btn-peerland-phases"),
+  btnTellteaPhases: document.getElementById("btn-telltea-phases"),
   groupMergeBar: document.getElementById("group-merge-bar"),
   groupMergeCount: document.getElementById("group-merge-count"),
   groupMergeName: document.getElementById("group-merge-name"),
@@ -273,11 +279,19 @@ function paintProjectNickUi() {
   if (els.btnPeerlandPhases) {
     els.btnPeerlandPhases.hidden = !isPeerlandProject();
   }
+  if (els.btnTellteaPhases) {
+    els.btnTellteaPhases.hidden = !isTellteaProject();
+  }
 }
 
 function isPeerlandProject() {
   const blob = `${state.fileName || ""} ${state.projectName || ""}`;
   return /peerland/i.test(blob);
+}
+
+function isTellteaProject() {
+  const blob = `${state.fileName || ""} ${state.projectName || ""}`;
+  return /telltea|เทลที/i.test(blob);
 }
 
 function displayGroupName(g) {
@@ -2603,6 +2617,51 @@ function applyPeerlandPhases15() {
   );
 }
 
+/** Apply telltea phases 1–5 to uncategorized rows only. */
+function applyTellteaPhases15() {
+  if (!requireLogin()) return;
+  if (!isTellteaProject()) {
+    toast("ปุ่มนี้ใช้กับโปรเจกต์ telltea / เทลที เท่านั้น");
+    return;
+  }
+  const uncat = state.transactions.filter((t) => !String(t.category || "").trim()).length;
+  if (!uncat) {
+    toast("ไม่มีรายการที่ยังว่างให้จัดกลุ่ม");
+    return;
+  }
+  const ok = window.confirm(
+    `จัดกลุ่ม telltea เฟส 1–5?\n\n` +
+      `· เฟส 1 รายได้แพลตฟอร์ม/หน้าร้าน (${TELLTEA_PHASE_META.phase1Groups})\n` +
+      `· เฟส 2 เจ้าของ+ครอบครัว (${TELLTEA_PHASE_META.phase2Groups})\n` +
+      `· เฟส 3 จ่ายประจำ/บุคคล (${TELLTEA_PHASE_META.phase3Groups})\n` +
+      `· เฟส 4 คู่ค้า/บริการ (${TELLTEA_PHASE_META.phase4Groups})\n` +
+      `· เฟส 5 หางยาว / อื่นๆ (${TELLTEA_PHASE_META.phase5Groups})\n\n` +
+      `ติดเฉพาะที่ยังว่าง (~${uncat.toLocaleString("th-TH")} รายการ)\n` +
+      `ชุดกลุ่ม ${TELLTEA_PHASE_META.totalGroups} ชื่อ · กดเลิกทำได้`
+  );
+  if (!ok) return;
+
+  let appliedCount = 0;
+  withUndo("จัดกลุ่ม telltea เฟส 1–5", () => {
+    state.categories = [...new Set([...TELLTEA_CATEGORIES, ...(state.categories || [])])];
+    const result = applyTellteaPhasesAll(state.transactions, upsertRule, applyRules);
+    const kept = (state.rules || []).filter((r) => !r.curated);
+    const byKey = new Map();
+    for (const r of [...kept, ...result.rules]) byKey.set(r.key, r);
+    state.rules = [...byKey.values()];
+    state.transactions = result.transactions;
+    appliedCount = result.applied;
+  });
+  schedulePersist({ immediate: true });
+  scheduleRender();
+  const left = state.transactions.filter((t) => !String(t.category || "").trim()).length;
+  toast(
+    appliedCount > 0
+      ? `Telltea เฟส 1–5 ติดกลุ่ม ${appliedCount.toLocaleString("th-TH")} รายการ · เหลือว่าง ${left.toLocaleString("th-TH")}`
+      : "ไม่พบรายการที่กฎจับได้เพิ่ม"
+  );
+}
+
 async function ensureTellteaProjectSeeded() {
   const exists = workspace.projects.some(
     (p) =>
@@ -3237,6 +3296,7 @@ function wireEvents() {
   els.btnOpenTelltea?.addEventListener("click", () => openTellteaProject().catch((err) => toast(err.message)));
   els.btnOpenPeerland?.addEventListener("click", () => openPeerlandProject().catch((err) => toast(err.message)));
   els.btnPeerlandPhases?.addEventListener("click", () => applyPeerlandPhases15());
+  els.btnTellteaPhases?.addEventListener("click", () => applyTellteaPhases15());
   els.btnGroupMerge?.addEventListener("click", () => mergeSelectedGroups());
   els.btnGroupMergeClear?.addEventListener("click", () => {
     selectedGroupKeys.clear();
