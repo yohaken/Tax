@@ -126,11 +126,12 @@ if (previousPath && fs.existsSync(previousPath)) {
   }
 }
 
-const discovery = tagDiscoveryReview(txs, previous);
-txs = discovery.transactions;
-
-// Keep prior “รายการใหม่ที่ค้นเจอ” tags that still match this statement
+let discovery = { tagged: 0, brandNew: 0, dirFlip: 0, keptPrior: 0 };
 if (previous.length) {
+  discovery = tagDiscoveryReview(txs, previous);
+  txs = discovery.transactions;
+
+  // Keep prior “รายการใหม่ที่ค้นเจอ” tags that still match this statement
   const { DISCOVERY_REVIEW_GROUP, txFingerprint } = await import(
     pathToFileURL(path.resolve("public/js/discovery-review.js")).href
   );

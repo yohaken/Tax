@@ -236,6 +236,7 @@ const els = {
   btnDeleteProject: document.getElementById("btn-delete-project"),
   btnRenameProject: document.getElementById("btn-rename-project"),
   btnOpenTelltea: document.getElementById("btn-open-telltea"),
+  btnOpenTelltea2026H1: document.getElementById("btn-open-telltea-2026-h1"),
   btnOpenPeerland: document.getElementById("btn-open-peerland"),
   btnPeerlandPhases: document.getElementById("btn-peerland-phases"),
   btnTellteaPhases: document.getElementById("btn-telltea-phases"),
@@ -360,6 +361,16 @@ function isTellteaProject() {
 function isTellteaProjectMeta(p) {
   const blob = `${p?.fileName || ""} ${p?.name || ""} ${p?.projectSource || ""}`;
   return /telltea|เทลที|ชานม/i.test(blob);
+}
+
+function isTelltea2024ProjectMeta(p) {
+  const blob = `${p?.fileName || ""} ${p?.name || ""}`;
+  return /telltea_2024-2025/i.test(blob);
+}
+
+function isTelltea2026H1ProjectMeta(p) {
+  const blob = `${p?.fileName || ""} ${p?.name || ""}`;
+  return /telltea_2026_h1|telltea 1-6\/2026|1-6\/2026/i.test(blob);
 }
 
 function displayGroupName(g) {
@@ -3260,7 +3271,7 @@ async function softMergeBundledStatement({
 }
 
 async function openTellteaProject() {
-  const existing = workspace.projects.find(isTellteaProjectMeta);
+  const existing = workspace.projects.find(isTelltea2024ProjectMeta);
   if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
     if (!requireLogin()) return null;
     syncActiveFromState();
@@ -3286,7 +3297,40 @@ async function openTellteaProject() {
     fileName: "telltea_2024-2025_full.pdf",
     projectName: "telltea_2024-2025",
     forceReplace: false,
-    matchProject: isTellteaProjectMeta,
+    matchProject: isTelltea2024ProjectMeta,
+    starterCategories: TELLTEA_CATEGORIES,
+  });
+}
+
+async function openTelltea2026H1Project() {
+  const existing = workspace.projects.find(isTelltea2026H1ProjectMeta);
+  if (existing && Array.isArray(existing.transactions) && existing.transactions.length) {
+    if (!requireLogin()) return null;
+    syncActiveFromState();
+    applyProjectToState(existing);
+    clearSessionUi();
+    try {
+      await softMergeBundledStatement({
+        project: existing,
+        jsonUrl: "data/telltea_2026_h1.json",
+        fileName: "telltea_2026_h1.pdf",
+        silent: true,
+      });
+    } catch (err) {
+      console.warn(err);
+    }
+    schedulePersist();
+    renderProjectSelect();
+    renderTable();
+    toast(`เปิด “${existing.name}” · คงการจัดกลุ่มเดิม`);
+    return existing;
+  }
+  return loadBundledDataFile({
+    jsonUrl: "data/telltea_2026_h1.json",
+    fileName: "telltea_2026_h1.pdf",
+    projectName: "telltea 1-6/2026",
+    forceReplace: false,
+    matchProject: isTelltea2026H1ProjectMeta,
     starterCategories: TELLTEA_CATEGORIES,
   });
 }
@@ -3441,7 +3485,7 @@ async function ensurePeerlandProjectSeeded() {
 }
 
 async function ensureTellteaProjectSeeded() {
-  const telltea = workspace.projects.find(isTellteaProjectMeta);
+  const telltea = workspace.projects.find(isTelltea2024ProjectMeta);
   if (telltea) {
     try {
       await softMergeBundledStatement({
@@ -3457,6 +3501,29 @@ async function ensureTellteaProjectSeeded() {
   }
   try {
     return await openTellteaProject();
+  } catch (err) {
+    console.warn(err);
+    return null;
+  }
+}
+
+async function ensureTelltea2026H1ProjectSeeded() {
+  const telltea = workspace.projects.find(isTelltea2026H1ProjectMeta);
+  if (telltea) {
+    try {
+      await softMergeBundledStatement({
+        project: telltea,
+        jsonUrl: "data/telltea_2026_h1.json",
+        fileName: "telltea_2026_h1.pdf",
+        silent: true,
+      });
+    } catch (err) {
+      console.warn(err);
+    }
+    return null;
+  }
+  try {
+    return await openTelltea2026H1Project();
   } catch (err) {
     console.warn(err);
     return null;
@@ -3671,6 +3738,7 @@ async function hydrateAfterLogin(user) {
   // Seed bundled projects in background — never block first paint
   void ensurePeerlandProjectSeeded().catch((err) => console.warn(err));
   void ensureTellteaProjectSeeded().catch((err) => console.warn(err));
+  void ensureTelltea2026H1ProjectSeeded().catch((err) => console.warn(err));
 }
 
 async function setupAuth() {
@@ -4132,6 +4200,9 @@ function wireEvents() {
   els.btnAuthHero?.addEventListener("click", handleAuthClick);
   els.btnDemo?.addEventListener("click", () => startDemo({ replace: true }).catch((err) => toast(err.message)));
   els.btnOpenTelltea?.addEventListener("click", () => openTellteaProject().catch((err) => toast(err.message)));
+  els.btnOpenTelltea2026H1?.addEventListener("click", () =>
+    openTelltea2026H1Project().catch((err) => toast(err.message))
+  );
   els.btnOpenPeerland?.addEventListener("click", () => openPeerlandProject().catch((err) => toast(err.message)));
   els.btnPeerlandPhases?.addEventListener("click", () => applyPeerlandPhases15());
   els.btnTellteaPhases?.addEventListener("click", () => applyTellteaPhases15());
