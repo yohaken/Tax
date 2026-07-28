@@ -433,26 +433,67 @@ export class PdfPasswordError extends Error {
   }
 }
 
+/** Only true PasswordException from pdf.js — never match bare numeric codes (false positives hang import UX). */
 function isPdfPasswordException(err) {
   if (!err) return false;
   if (err.name === "PasswordException") return true;
-  // pdf.js: PasswordResponses.NEED_PASSWORD = 1, INCORRECT_PASSWORD = 2
-  const code = err.code ?? err.status;
-  return code === 1 || code === 2;
+  const msg = String(err.message || err || "");
+  return /password\s*(required|incorrect|exception)|need\s*password|incorrect\s*password/i.test(msg);
 }
 
-export async function extractPdfTextLines(buffer, password = "") {
-  const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
-  let doc;
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label || `หมดเวลา ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+const PDFJS_SOURCES = [
+  {
+    main: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs",
+    worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs",
+  },
+  {
+    main: "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.min.mjs",
+    worker: "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs",
+  },
+];
+
+async function loadPdfJs() {
+  let lastErr;
+  for (const src of PDFJS_SOURCES) {
+    try {
+      const pdfjs = await withTimeout(import(src.main), 20000, "โหลดเครื่องอ่าน PDF ช้าเกินไป — ตรวจเน็ตแล้วลองใหม่");
+      pdfjs.GlobalWorkerOptions.workerSrc = src.worker;
+      return pdfjs;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("โหลดเครื่องอ่าน PDF ไม่สำเร็จ");
+}
+
+async function openPdfDocument(pdfjs, buffer, password = "") {
+  const params = {
+    data: buffer,
+    useSystemFonts: true,
+    // Avoid hanging forever if the worker script fails to fetch on mobile.
+    isEvalSupported: false,
+  };
+  // Important: omit password key when empty — unlocked PDFs must not get password: undefined.
+  if (password) params.password = password;
+
   try {
-    doc = await pdfjs.getDocument({
-      data: buffer,
-      password: password || undefined,
-    }).promise;
+    return await withTimeout(
+      pdfjs.getDocument(params).promise,
+      45000,
+      "อ่าน PDF นานเกินไป — ลองไฟล์ใหม่หรือรีเฟรชหน้า"
+    );
   } catch (err) {
     if (isPdfPasswordException(err)) {
-      const incorrect = (err.code ?? err.status) === 2;
+      const incorrect =
+        (err.code ?? err.status) === 2 || /incorrect/i.test(String(err.message || ""));
       throw new PdfPasswordError(
         incorrect ? "รหัสผ่าน PDF ไม่ถูกต้อง" : "ไฟล์ PDF นี้มีรหัสล็อก",
         { incorrect }
@@ -460,40 +501,61 @@ export async function extractPdfTextLines(buffer, password = "") {
     }
     throw err;
   }
+}
+
+/**
+ * @param {Uint8Array} buffer
+ * @param {string} [password]
+ * @param {{ onProgress?: (info: { page: number, pages: number }) => void }} [opts]
+ */
+export async function extractPdfTextLines(buffer, password = "", opts = {}) {
+  const pdfjs = await loadPdfJs();
+  const doc = await openPdfDocument(pdfjs, buffer, password);
   const lines = [];
-  for (let pageNo = 1; pageNo <= doc.numPages; pageNo += 1) {
-    const page = await doc.getPage(pageNo);
-    const content = await page.getTextContent();
-    // Group by approximate Y position
-    const rows = new Map();
-    for (const item of content.items) {
-      const str = item.str;
-      if (!str) continue;
-      const y = Math.round((item.transform?.[5] ?? 0) * 2) / 2;
-      const key = String(y);
-      if (!rows.has(key)) rows.set(key, []);
-      rows.get(key).push({ x: item.transform?.[4] ?? 0, str });
+  const pages = doc.numPages || 0;
+  try {
+    for (let pageNo = 1; pageNo <= pages; pageNo += 1) {
+      const page = await doc.getPage(pageNo);
+      const content = await page.getTextContent();
+      // Group by approximate Y position
+      const rows = new Map();
+      for (const item of content.items) {
+        const str = item.str;
+        if (!str) continue;
+        const y = Math.round((item.transform?.[5] ?? 0) * 2) / 2;
+        const key = String(y);
+        if (!rows.has(key)) rows.set(key, []);
+        rows.get(key).push({ x: item.transform?.[4] ?? 0, str });
+      }
+      const sortedY = [...rows.keys()].map(Number).sort((a, b) => b - a);
+      for (const y of sortedY) {
+        const parts = rows
+          .get(String(y))
+          .sort((a, b) => a.x - b.x)
+          .map((p) => p.str);
+        lines.push(parts.join(" "));
+      }
+      if (typeof opts.onProgress === "function") {
+        opts.onProgress({ page: pageNo, pages });
+      }
+      // Yield so the toast/progress UI can paint on large statements.
+      if (pageNo % 5 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
     }
-    const sortedY = [...rows.keys()].map(Number).sort((a, b) => b - a);
-    for (const y of sortedY) {
-      const parts = rows
-        .get(String(y))
-        .sort((a, b) => a.x - b.x)
-        .map((p) => p.str);
-      lines.push(parts.join(" "));
-    }
+  } finally {
+    await doc.destroy?.();
   }
-  await doc.destroy?.();
   return lines;
 }
 
-export async function parseFile(file, { password = "" } = {}) {
+export async function parseFile(file, { password = "", onProgress } = {}) {
   const name = file.name || "statement";
   const lower = name.toLowerCase();
   const buffer = await file.arrayBuffer();
 
   if (lower.endsWith(".pdf") || file.type === "application/pdf") {
-    const lines = await extractPdfTextLines(new Uint8Array(buffer), password);
+    const lines = await extractPdfTextLines(new Uint8Array(buffer), password, { onProgress });
     const rows = parsePdfLines(lines, name);
     return reconcileDirectionsFromBalances(dedupeTransactions(rows)).transactions;
   }

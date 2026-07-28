@@ -3522,23 +3522,80 @@ function autoCategorizeImportedRows(rows) {
   };
 }
 
-async function parseFileWithPassword(file, sharedPassword) {
+/** In-app password dialog — window.prompt is blocked/broken on many mobile browsers. */
+function askPdfPassword(fileName, { incorrect = false } = {}) {
+  const modal = document.getElementById("pwd-modal");
+  const form = document.getElementById("pwd-form");
+  const input = document.getElementById("pwd-input");
+  const msg = document.getElementById("pwd-msg");
+  const cancelBtn = document.getElementById("pwd-cancel");
+  if (!modal || !form || !input) {
+    const fallback = window.prompt(
+      incorrect
+        ? `รหัสผ่านไม่ถูกต้องสำหรับ “${fileName}” — ลองใหม่`
+        : `ไฟล์ “${fileName}” มีรหัสล็อก — ใส่รหัสผ่าน PDF`,
+      ""
+    );
+    return Promise.resolve(fallback == null ? null : String(fallback));
+  }
+  if (msg) {
+    msg.textContent = incorrect
+      ? `รหัสไม่ถูกต้องสำหรับ “${fileName}” — ลองใหม่ (ถ้าไม่มีรหัส ให้ยกเลิกแล้วตรวจว่าเป็น PDF เปิดได้)`
+      : `ไฟล์ “${fileName}” ล็อกอยู่ — ใส่รหัสผ่าน PDF (ถ้าไม่มีรหัส ให้ยกเลิก)`;
+  }
+  modal.hidden = false;
+  input.value = "";
+  setTimeout(() => input.focus(), 30);
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      form.removeEventListener("submit", onSubmit);
+      cancelBtn?.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      modal.hidden = true;
+    };
+    const onSubmit = (e) => {
+      e.preventDefault();
+      const value = String(input.value || "");
+      cleanup();
+      resolve(value);
+    };
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+    const onBackdrop = (e) => {
+      if (e.target === modal) onCancel();
+    };
+    form.addEventListener("submit", onSubmit);
+    cancelBtn?.addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+  });
+}
+
+async function parseFileWithPassword(file, sharedPassword, onProgress) {
   let password = sharedPassword || "";
   for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
-      const rows = await parseFile(file, { password });
+      const rows = await parseFile(file, { password, onProgress });
       return { rows, password };
     } catch (err) {
-      if (!(err instanceof PdfPasswordError)) throw err;
-      const hint = err.incorrect
-        ? `รหัสผ่านไม่ถูกต้องสำหรับ “${file.name}” — ลองใหม่`
-        : `ไฟล์ “${file.name}” มีรหัสล็อก — ใส่รหัสผ่าน PDF`;
-      const next = window.prompt(hint, password || "");
-      if (next == null) throw new Error("ยกเลิกการใส่รหัสผ่าน PDF");
+      const isPwd =
+        err instanceof PdfPasswordError ||
+        err?.name === "PdfPasswordError" ||
+        err?.name === "PasswordException";
+      if (!isPwd) throw err;
+      const incorrect = Boolean(err.incorrect) || /ไม่ถูกต้อง|incorrect/i.test(String(err.message || ""));
+      const next = await askPdfPassword(file.name || "statement.pdf", { incorrect });
+      if (next == null) throw new Error("ยกเลิกการเปิด PDF");
       password = String(next);
+      // Empty submit on a locked file — ask again instead of silently hanging.
+      if (!password && !incorrect) {
+        toast("ไฟล์นี้ต้องการรหัสผ่าน — ถ้าไม่มีรหัส ไฟล์อาจเปิดในเครื่องไม่ได้");
+      }
     }
   }
-  throw new Error(`${file.name}: ใส่รหัสผ่าน PDF ไม่สำเร็จ`);
+  throw new Error(`${file.name}: เปิด PDF ไม่สำเร็จ`);
 }
 
 async function importFiles(fileList) {
@@ -3548,74 +3605,93 @@ async function importFiles(fileList) {
 
   // Always create new project(s) — never merge into the current one.
   syncActiveFromState();
+  showProgress(`กำลังนำเข้า ${files.length} ไฟล์…`, { mode: "busy" });
   toast(`กำลังนำเข้าสเตทเมนต์ ${files.length} ไฟล์…`);
 
   const created = [];
   let sharedPassword = "";
   let autoTaggedTotal = 0;
-  for (const file of files) {
-    try {
-      const parsed = await parseFileWithPassword(file, sharedPassword);
-      if (parsed.password) sharedPassword = parsed.password;
-      let rows = dedupeTransactions(parsed.rows).map((t) => ({
-        ...t,
-        category: "",
-        note: "",
-        source: t.source || file.name,
-      }));
-      await new Promise((r) => setTimeout(r, 0));
-      if (!rows.length) {
-        toast(`${file.name}: ไม่พบรายการ`);
-        continue;
+  try {
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      try {
+        showProgress(`อ่าน “${file.name}” (${i + 1}/${files.length})…`, { mode: "busy" });
+        const parsed = await parseFileWithPassword(file, sharedPassword, ({ page, pages }) => {
+          if (!pages) return;
+          showProgress(`อ่าน PDF หน้า ${page}/${pages} · ${file.name}`, { mode: "busy" });
+        });
+        if (parsed.password) sharedPassword = parsed.password;
+        let rows = dedupeTransactions(parsed.rows).map((t) => ({
+          ...t,
+          category: "",
+          note: "",
+          source: t.source || file.name,
+        }));
+        await yieldToUi();
+        if (!rows.length) {
+          toast(`${file.name}: ไม่พบรายการในไฟล์`);
+          continue;
+        }
+
+        showProgress(`แยกประเภท ${rows.length.toLocaleString("th-TH")} รายการ…`, { mode: "busy" });
+        await yieldToUi();
+        // Fast categorize: delivery platforms vs other income (same shop rules as Telltea).
+        const tagged = autoCategorizeImportedRows(rows);
+        rows = tagged.transactions;
+        const categories = tagged.categories;
+        const rules = tagged.rules;
+        autoTaggedTotal += tagged.applied;
+
+        const baseName = fileStem(file.name);
+        const project = createProjectFromRows({
+          name: baseName,
+          source: "import",
+          fileName: file.name || baseName,
+          rows,
+          categories,
+          rules,
+          groupNotes: {},
+          groupNicknames: {},
+          activate: false,
+        });
+        created.push({ project, applied: tagged.applied });
+      } catch (err) {
+        console.error(err);
+        toast(`${file.name}: ${err.message || "อ่านไม่สำเร็จ"}`);
       }
-
-      // Fast categorize: delivery platforms vs other income (same shop rules as Telltea).
-      const tagged = autoCategorizeImportedRows(rows);
-      rows = tagged.transactions;
-      const categories = tagged.categories;
-      const rules = tagged.rules;
-      autoTaggedTotal += tagged.applied;
-
-      const baseName = fileStem(file.name);
-      const project = createProjectFromRows({
-        name: baseName,
-        source: "import",
-        fileName: file.name || baseName,
-        rows,
-        categories,
-        rules,
-        groupNotes: {},
-        groupNicknames: {},
-        activate: false,
-      });
-      created.push({ project, applied });
-    } catch (err) {
-      console.error(err);
-      toast(`${file.name}: ${err.message || "อ่านไม่สำเร็จ"}`);
     }
-  }
 
-  if (!created.length) {
-    toast("ไม่พบรายการในไฟล์ — ไม่ได้สร้างโปรเจกต์");
-    return;
-  }
+    if (!created.length) {
+      showProgress("นำเข้าไม่สำเร็จ", { mode: "err" });
+      hideProgress(2200);
+      toast("ไม่พบรายการในไฟล์ — ไม่ได้สร้างโปรเจกต์");
+      return;
+    }
 
-  // Switch to the newest imported project only.
-  const latest = created[0].project;
-  applyProjectToState(latest);
-  clearSessionUi();
-  schedulePersist();
-  renderProjectSelect();
-  renderTable();
-  const taggedMsg =
-    autoTaggedTotal > 0
-      ? ` · แยกประเภทอัตโนมัติ ${autoTaggedTotal.toLocaleString("th-TH")} รายการ`
-      : "";
-  toast(
-    created.length === 1
-      ? `สร้างโปรเจกต์ “${latest.name}” · ${latest.transactions.length.toLocaleString("th-TH")} รายการ${taggedMsg}`
-      : `สร้าง ${created.length.toLocaleString("th-TH")} โปรเจกต์ใหม่ · เปิด “${latest.name}”${taggedMsg}`
-  );
+    // Switch to the newest imported project only.
+    const latest = created[0].project;
+    applyProjectToState(latest);
+    clearSessionUi();
+    schedulePersist({ immediate: true });
+    renderProjectSelect();
+    renderTable();
+    const taggedMsg =
+      autoTaggedTotal > 0
+        ? ` · แยกประเภทอัตโนมัติ ${autoTaggedTotal.toLocaleString("th-TH")} รายการ`
+        : "";
+    const msg =
+      created.length === 1
+        ? `สร้างโปรเจกต์ “${latest.name}” · ${latest.transactions.length.toLocaleString("th-TH")} รายการ${taggedMsg}`
+        : `สร้าง ${created.length.toLocaleString("th-TH")} โปรเจกต์ใหม่ · เปิด “${latest.name}”${taggedMsg}`;
+    showProgress(msg, { mode: "ok" });
+    hideProgress(2400);
+    toast(msg);
+  } catch (err) {
+    console.error(err);
+    showProgress(err?.message || "นำเข้าไม่สำเร็จ", { mode: "err" });
+    hideProgress(2800);
+    toast(err?.message || "นำเข้าไม่สำเร็จ");
+  }
 }
 
 async function startDemo({ replace = true, fresh = false, recordUndo = true } = {}) {
