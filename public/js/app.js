@@ -355,11 +355,6 @@ function isPeerlandProjectMeta(p) {
   return /peerland/i.test(blob);
 }
 
-function isTellteaProjectMeta(p) {
-  const blob = `${p?.fileName || ""} ${p?.name || ""} ${p?.projectSource || ""}`;
-  return /telltea|เทลที|ชานม/i.test(blob);
-}
-
 function isTelltea2024ProjectMeta(p) {
   const blob = `${p?.fileName || ""} ${p?.name || ""}`;
   return /telltea_2024-2025/i.test(blob);
