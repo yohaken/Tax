@@ -424,10 +424,42 @@ export function parsePdfLines(lines, fileName) {
   return txs;
 }
 
-export async function extractPdfTextLines(buffer) {
+/** Thrown when a PDF needs a password (or the password was wrong). */
+export class PdfPasswordError extends Error {
+  constructor(message, { incorrect = false } = {}) {
+    super(message);
+    this.name = "PdfPasswordError";
+    this.incorrect = Boolean(incorrect);
+  }
+}
+
+function isPdfPasswordException(err) {
+  if (!err) return false;
+  if (err.name === "PasswordException") return true;
+  // pdf.js: PasswordResponses.NEED_PASSWORD = 1, INCORRECT_PASSWORD = 2
+  const code = err.code ?? err.status;
+  return code === 1 || code === 2;
+}
+
+export async function extractPdfTextLines(buffer, password = "") {
   const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
-  const doc = await pdfjs.getDocument({ data: buffer }).promise;
+  let doc;
+  try {
+    doc = await pdfjs.getDocument({
+      data: buffer,
+      password: password || undefined,
+    }).promise;
+  } catch (err) {
+    if (isPdfPasswordException(err)) {
+      const incorrect = (err.code ?? err.status) === 2;
+      throw new PdfPasswordError(
+        incorrect ? "รหัสผ่าน PDF ไม่ถูกต้อง" : "ไฟล์ PDF นี้มีรหัสล็อก",
+        { incorrect }
+      );
+    }
+    throw err;
+  }
   const lines = [];
   for (let pageNo = 1; pageNo <= doc.numPages; pageNo += 1) {
     const page = await doc.getPage(pageNo);
@@ -451,16 +483,17 @@ export async function extractPdfTextLines(buffer) {
       lines.push(parts.join(" "));
     }
   }
+  await doc.destroy?.();
   return lines;
 }
 
-export async function parseFile(file) {
+export async function parseFile(file, { password = "" } = {}) {
   const name = file.name || "statement";
   const lower = name.toLowerCase();
   const buffer = await file.arrayBuffer();
 
   if (lower.endsWith(".pdf") || file.type === "application/pdf") {
-    const lines = await extractPdfTextLines(new Uint8Array(buffer));
+    const lines = await extractPdfTextLines(new Uint8Array(buffer), password);
     const rows = parsePdfLines(lines, name);
     return reconcileDirectionsFromBalances(dedupeTransactions(rows)).transactions;
   }

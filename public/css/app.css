@@ -148,6 +148,22 @@ body {
 }
 .fine { margin-top: 1.25rem; font-size: 0.85rem; color: var(--mute); }
 .fine strong { color: var(--ink); font-weight: 600; }
+.archive-links {
+  margin: 1.5rem auto 0;
+  max-width: 28rem;
+  text-align: left;
+  color: var(--mute);
+  font-size: 0.85rem;
+}
+.archive-links summary {
+  cursor: pointer;
+  list-style: none;
+  text-align: center;
+  color: var(--mute);
+}
+.archive-links summary::-webkit-details-marker { display: none; }
+.archive-links[open] summary { margin-bottom: 0.65rem; }
+.archive-actions { justify-content: center; }
 
 .workspace { animation: rise 0.4s ease both; }
 .workspace.is-hidden, .hero.is-hidden { display: none; }

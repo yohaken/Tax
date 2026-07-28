@@ -1,4 +1,4 @@
-import { parseFile, dedupeTransactions } from "./parser.js";
+import { parseFile, dedupeTransactions, PdfPasswordError } from "./parser.js";
 import {
   loadState,
   saveState,
@@ -234,6 +234,7 @@ const els = {
   btnReloadProject: document.getElementById("btn-reload-project"),
   btnSplitMerged: document.getElementById("btn-split-merged"),
   btnDeleteProject: document.getElementById("btn-delete-project"),
+  btnDeleteAllProjects: document.getElementById("btn-delete-all-projects"),
   btnRenameProject: document.getElementById("btn-rename-project"),
   btnOpenTelltea: document.getElementById("btn-open-telltea"),
   btnOpenTelltea2026H1: document.getElementById("btn-open-telltea-2026-h1"),
@@ -338,8 +339,9 @@ function paintProjectNickUi() {
   if (els.btnPeerlandPhases) {
     els.btnPeerlandPhases.hidden = !isPeerlandProject();
   }
+  // Shop-style fast categorize is available on every imported project.
   if (els.btnTellteaPhases) {
-    els.btnTellteaPhases.hidden = !isTellteaProject();
+    els.btnTellteaPhases.hidden = false;
   }
 }
 
@@ -351,11 +353,6 @@ function isPeerlandProject() {
 function isPeerlandProjectMeta(p) {
   const blob = `${p?.fileName || ""} ${p?.name || ""} ${p?.projectSource || ""}`;
   return /peerland/i.test(blob);
-}
-
-function isTellteaProject() {
-  const blob = `${state.fileName || ""} ${state.projectName || ""}`;
-  return /telltea|เทลที|ชานม/i.test(blob);
 }
 
 function isTellteaProjectMeta(p) {
@@ -3006,6 +3003,46 @@ async function reloadProjectFresh() {
   toast("เคลียร์แท็ก/Note/ชื่อเล่นแล้ว · กดเลิกทำได้");
 }
 
+function makeEmptyProject() {
+  return {
+    id: makeProjectId(),
+    name: "โปรเจกต์ว่าง",
+    source: "local",
+    fileName: "",
+    updatedAt: new Date().toISOString(),
+    ...emptyProjectFields(),
+  };
+}
+
+/** One-time (v57): wipe leftover projects so daily statement import starts clean. */
+function purgeStaleBundledProjects({ silent = false } = {}) {
+  const FLAG = "taxtag.purgedAll.v57";
+  try {
+    if (localStorage.getItem(FLAG) === "1") return 0;
+  } catch {
+    /* ignore */
+  }
+  syncActiveFromState();
+  const real = workspace.projects.filter(
+    (p) => Array.isArray(p.transactions) && p.transactions.length > 0
+  );
+  const removed = real.length;
+  workspace.projects = [makeEmptyProject()];
+  applyProjectToState(workspace.projects[0]);
+  clearSessionUi();
+  schedulePersist({ immediate: true });
+  renderProjectSelect();
+  try {
+    localStorage.setItem(FLAG, "1");
+  } catch {
+    /* ignore */
+  }
+  if (removed > 0 && !silent) {
+    toast(`ลบโปรเจกต์ค้าง ${removed.toLocaleString("th-TH")} ชุดแล้ว — พร้อมนำเข้าสเตทเมนต์`);
+  }
+  return removed;
+}
+
 function deleteActiveProject() {
   if (!requireLogin()) return;
   const name = state.projectName || state.fileName || "โปรเจกต์นี้";
@@ -3018,14 +3055,7 @@ function deleteActiveProject() {
   const id = workspace.activeId;
   workspace.projects = workspace.projects.filter((p) => p.id !== id);
   if (!workspace.projects.length) {
-    const empty = {
-      id: makeProjectId(),
-      name: "โปรเจกต์ว่าง",
-      source: "local",
-      fileName: "",
-      updatedAt: new Date().toISOString(),
-      ...emptyProjectFields(),
-    };
+    const empty = makeEmptyProject();
     workspace.projects = [empty];
     applyProjectToState(empty);
   } else {
@@ -3039,6 +3069,32 @@ function deleteActiveProject() {
   renderProjectSelect();
   renderTable();
   toast(`ลบโปรเจกต์ “${name}” แล้ว`);
+}
+
+function deleteAllProjects() {
+  if (!requireLogin()) return;
+  const real = workspace.projects.filter(
+    (p) => Array.isArray(p.transactions) && p.transactions.length > 0
+  );
+  const count = real.length || workspace.projects.length;
+  const rows = real.reduce((n, p) => n + (p.transactions?.length || 0), 0);
+  const ok = window.confirm(
+    `ลบทุกโปรเจกต์ในเครื่องนี้?\n\n` +
+      `โปรเจกต์ ${count.toLocaleString("th-TH")} ชุด · ` +
+      `${rows.toLocaleString("th-TH")} รายการ\n` +
+      `ยกเลิกไม่ได้`
+  );
+  if (!ok) return;
+  workspace.projects = [makeEmptyProject()];
+  applyProjectToState(workspace.projects[0]);
+  clearSessionUi();
+  undoStack.length = 0;
+  updateUndoButton();
+  selectedIds.clear();
+  schedulePersist({ immediate: true });
+  renderProjectSelect();
+  renderTable();
+  toast("ลบทุกโปรเจกต์แล้ว — พร้อมนำเข้าสเตทเมนต์ใหม่");
 }
 
 function renameActiveProject() {
@@ -3415,32 +3471,30 @@ function applyPeerlandPhases15() {
   );
 }
 
-/** Apply telltea phases 1–5 to uncategorized rows only. */
-function applyTellteaPhases15() {
-  if (!requireLogin()) return;
-  if (!isTellteaProject()) {
-    toast("ปุ่มนี้ใช้กับโปรเจกต์ telltea / เทลที เท่านั้น");
-    return;
-  }
+/** Apply shop/delivery categorization (Telltea phases 1–5) to uncategorized rows. */
+function applyTellteaPhases15({ confirm = true } = {}) {
+  if (!requireLogin()) return 0;
   const uncat = state.transactions.filter((t) => !String(t.category || "").trim()).length;
   if (!uncat) {
     toast("ไม่มีรายการที่ยังว่างให้จัดกลุ่ม");
-    return;
+    return 0;
   }
-  const ok = window.confirm(
-    `จัดกลุ่ม telltea เฟส 1–5?\n\n` +
-      `· เฟส 1 รายได้แพลตฟอร์ม/หน้าร้าน (${TELLTEA_PHASE_META.phase1Groups})\n` +
-      `· เฟส 2 เจ้าของ+ครอบครัว (${TELLTEA_PHASE_META.phase2Groups})\n` +
-      `· เฟส 3 จ่ายประจำ/บุคคล (${TELLTEA_PHASE_META.phase3Groups})\n` +
-      `· เฟส 4 คู่ค้า/บริการ (${TELLTEA_PHASE_META.phase4Groups})\n` +
-      `· เฟส 5 หางยาว / อื่นๆ (${TELLTEA_PHASE_META.phase5Groups})\n\n` +
-      `ติดเฉพาะที่ยังว่าง (~${uncat.toLocaleString("th-TH")} รายการ)\n` +
-      `ชุดกลุ่ม ${TELLTEA_PHASE_META.totalGroups} ชื่อ · กดเลิกทำได้`
-  );
-  if (!ok) return;
+  if (confirm) {
+    const ok = window.confirm(
+      `แยกประเภทเร็ว (รายได้ delivery / หน้าร้าน / อื่น)?\n\n` +
+        `· เฟส 1 รายได้แพลตฟอร์ม/หน้าร้าน (${TELLTEA_PHASE_META.phase1Groups})\n` +
+        `· เฟส 2 เจ้าของ+ครอบครัว (${TELLTEA_PHASE_META.phase2Groups})\n` +
+        `· เฟส 3 จ่ายประจำ/บุคคล (${TELLTEA_PHASE_META.phase3Groups})\n` +
+        `· เฟส 4 คู่ค้า/บริการ (${TELLTEA_PHASE_META.phase4Groups})\n` +
+        `· เฟส 5 หางยาว / อื่นๆ (${TELLTEA_PHASE_META.phase5Groups})\n\n` +
+        `ติดเฉพาะที่ยังว่าง (~${uncat.toLocaleString("th-TH")} รายการ)\n` +
+        `ชุดกลุ่ม ${TELLTEA_PHASE_META.totalGroups} ชื่อ · กดเลิกทำได้`
+    );
+    if (!ok) return 0;
+  }
 
   let appliedCount = 0;
-  withUndo("จัดกลุ่ม telltea เฟส 1–5", () => {
+  withUndo("แยกประเภทเร็ว", () => {
     state.categories = [...new Set([...TELLTEA_CATEGORIES, ...(state.categories || [])])];
     const result = applyTellteaPhasesAll(state.transactions, upsertRule, applyRules);
     const kept = (state.rules || []).filter((r) => !r.curated);
@@ -3455,79 +3509,41 @@ function applyTellteaPhases15() {
   const left = state.transactions.filter((t) => !String(t.category || "").trim()).length;
   toast(
     appliedCount > 0
-      ? `Telltea เฟส 1–5 ติดกลุ่ม ${appliedCount.toLocaleString("th-TH")} รายการ · เหลือว่าง ${left.toLocaleString("th-TH")}`
+      ? `แยกประเภท ${appliedCount.toLocaleString("th-TH")} รายการ · เหลือว่าง ${left.toLocaleString("th-TH")}`
       : "ไม่พบรายการที่กฎจับได้เพิ่ม"
   );
+  return appliedCount;
 }
 
-async function ensurePeerlandProjectSeeded() {
-  const peer = workspace.projects.find(isPeerlandProjectMeta);
-  if (peer) {
-    // Never wipe an existing Peerland project — only append newly found rows.
-    try {
-      await softMergeBundledStatement({
-        project: peer,
-        jsonUrl: "data/peerland_2024-2025.json",
-        fileName: "peerland_2024-2025_full.pdf",
-        silent: true,
-      });
-    } catch (err) {
-      console.warn(err);
-    }
-    return null;
-  }
-  try {
-    return await openPeerlandProject();
-  } catch (err) {
-    console.warn(err);
-    return null;
-  }
+/** Auto-tag imported rows with shop/delivery groups (Grab, Wongnai, etc.). */
+function autoCategorizeImportedRows(rows) {
+  const categories = ensureDiscoveryReviewCategory([...TELLTEA_CATEGORIES]);
+  const result = applyTellteaPhasesAll(rows, upsertRule, applyRules);
+  return {
+    transactions: result.transactions,
+    categories,
+    rules: result.rules,
+    applied: result.applied,
+  };
 }
 
-async function ensureTellteaProjectSeeded() {
-  const telltea = workspace.projects.find(isTelltea2024ProjectMeta);
-  if (telltea) {
+async function parseFileWithPassword(file, sharedPassword) {
+  let password = sharedPassword || "";
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
-      await softMergeBundledStatement({
-        project: telltea,
-        jsonUrl: "data/telltea_2024-2025.json",
-        fileName: "telltea_2024-2025_full.pdf",
-        silent: true,
-      });
+      const rows = await parseFile(file, { password });
+      return { rows, password };
     } catch (err) {
-      console.warn(err);
+      if (!(err instanceof PdfPasswordError)) throw err;
+      const hint = err.incorrect
+        ? `รหัสผ่านไม่ถูกต้องสำหรับ “${file.name}” — ลองใหม่`
+        : `ไฟล์ “${file.name}” มีรหัสล็อก — ใส่รหัสผ่าน PDF`;
+      const next = window.prompt(hint, password || "");
+      if (next == null) throw new Error("ยกเลิกการใส่รหัสผ่าน PDF");
+      password = String(next);
     }
-    return null;
   }
-  try {
-    return await openTellteaProject();
-  } catch (err) {
-    console.warn(err);
-    return null;
-  }
-}
-
-async function ensureTelltea2026H1ProjectSeeded() {
-  const telltea = workspace.projects.find(isTelltea2026H1ProjectMeta);
-  if (telltea) {
-    try {
-      await softMergeBundledStatement({
-        project: telltea,
-        jsonUrl: "data/telltea_2026_h1.json",
-        fileName: "telltea_2026_h1.pdf",
-        silent: true,
-      });
-    } catch (err) {
-      console.warn(err);
-    }
-    return null;
-  }
-  try {
-    return await openTelltea2026H1Project();
-  } catch (err) {
-    console.warn(err);
-    return null;
-  }
+  throw new Error(`${file.name}: ใส่รหัสผ่าน PDF ไม่สำเร็จ`);
 }
 
 async function importFiles(fileList) {
@@ -3537,13 +3553,16 @@ async function importFiles(fileList) {
 
   // Always create new project(s) — never merge into the current one.
   syncActiveFromState();
-  toast(`กำลังสร้างโปรเจกต์ใหม่จาก ${files.length} ไฟล์…`);
+  toast(`กำลังนำเข้าสเตทเมนต์ ${files.length} ไฟล์…`);
 
   const created = [];
+  let sharedPassword = "";
+  let autoTaggedTotal = 0;
   for (const file of files) {
     try {
-      let rows = await parseFile(file);
-      rows = dedupeTransactions(rows).map((t) => ({
+      const parsed = await parseFileWithPassword(file, sharedPassword);
+      if (parsed.password) sharedPassword = parsed.password;
+      let rows = dedupeTransactions(parsed.rows).map((t) => ({
         ...t,
         category: "",
         note: "",
@@ -3554,19 +3573,27 @@ async function importFiles(fileList) {
         toast(`${file.name}: ไม่พบรายการ`);
         continue;
       }
+
+      // Fast categorize: delivery platforms vs other income (same shop rules as Telltea).
+      const tagged = autoCategorizeImportedRows(rows);
+      rows = tagged.transactions;
+      const categories = tagged.categories;
+      const rules = tagged.rules;
+      autoTaggedTotal += tagged.applied;
+
       const baseName = fileStem(file.name);
       const project = createProjectFromRows({
         name: baseName,
         source: "import",
         fileName: file.name || baseName,
         rows,
-        categories: [],
-        rules: [],
+        categories,
+        rules,
         groupNotes: {},
         groupNicknames: {},
         activate: false,
       });
-      created.push(project);
+      created.push({ project, applied });
     } catch (err) {
       console.error(err);
       toast(`${file.name}: ${err.message || "อ่านไม่สำเร็จ"}`);
@@ -3579,16 +3606,20 @@ async function importFiles(fileList) {
   }
 
   // Switch to the newest imported project only.
-  const latest = created[0];
+  const latest = created[0].project;
   applyProjectToState(latest);
   clearSessionUi();
   schedulePersist();
   renderProjectSelect();
   renderTable();
+  const taggedMsg =
+    autoTaggedTotal > 0
+      ? ` · แยกประเภทอัตโนมัติ ${autoTaggedTotal.toLocaleString("th-TH")} รายการ`
+      : "";
   toast(
     created.length === 1
-      ? `สร้างโปรเจกต์ “${latest.name}” · ${latest.transactions.length.toLocaleString("th-TH")} รายการ (แยกจากของเดิม)`
-      : `สร้าง ${created.length.toLocaleString("th-TH")} โปรเจกต์ใหม่ · เปิด “${latest.name}”`
+      ? `สร้างโปรเจกต์ “${latest.name}” · ${latest.transactions.length.toLocaleString("th-TH")} รายการ${taggedMsg}`
+      : `สร้าง ${created.length.toLocaleString("th-TH")} โปรเจกต์ใหม่ · เปิด “${latest.name}”${taggedMsg}`
   );
 }
 
@@ -3735,10 +3766,9 @@ async function hydrateAfterLogin(user) {
   }
   await runPendingLoads();
   recoverMergedImports({ silent: true });
-  // Seed bundled projects in background — never block first paint
-  void ensurePeerlandProjectSeeded().catch((err) => console.warn(err));
-  void ensureTellteaProjectSeeded().catch((err) => console.warn(err));
-  void ensureTelltea2026H1ProjectSeeded().catch((err) => console.warn(err));
+  // Daily workflow: do not re-seed bundled projects; purge leftover seeds once.
+  purgeStaleBundledProjects({ silent: false });
+  renderTable();
 }
 
 async function setupAuth() {
@@ -4243,6 +4273,7 @@ function wireEvents() {
   });
   els.btnRenameProject?.addEventListener("click", renameActiveProject);
   els.btnDeleteProject?.addEventListener("click", deleteActiveProject);
+  els.btnDeleteAllProjects?.addEventListener("click", deleteAllProjects);
   els.fileInputHero?.addEventListener("change", (e) => {
     importFiles(e.target.files).catch((err) => toast(err.message || "นำเข้าไม่สำเร็จ"));
     e.target.value = "";
