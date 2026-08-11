@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-mynote-f1bbc}"
-SITE_ID="${SITE_ID:-tax}"
+SITE_ID="${SITE_ID:-mynote-tax}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -18,4 +18,4 @@ npx --yes firebase-tools@latest deploy --only hosting:tax,firestore:rules --proj
 
 echo
 echo "Done. Permanent link: https://${SITE_ID}.web.app"
-echo "Also add tax.web.app in Firebase Auth → Authorized domains if login fails."
+echo "Also add mynote-tax.web.app in Firebase Auth → Authorized domains if login fails."

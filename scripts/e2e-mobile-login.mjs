@@ -1,12 +1,12 @@
 /**
- * Real mobile Chromium E2E against https://tax.web.app
+ * Real mobile Chromium E2E against https://mynote-tax.web.app
  * Proves: build stamp, login CTA, Google redirect starts, redirect completion path.
  */
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 import path from "node:path";
 
-const LIVE = process.env.TAXTAG_URL || "https://tax.web.app/";
+const LIVE = process.env.TAXTAG_URL || "https://mynote-tax.web.app/";
 const OUT = process.env.E2E_OUT || "/opt/cursor/artifacts/screenshots";
 const CHROME = process.env.CHROME_PATH || "/usr/local/bin/google-chrome";
 const EXPECT_VERSION = Number(process.env.EXPECT_VERSION || 49);

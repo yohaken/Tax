@@ -13,19 +13,19 @@ function legacyMaybeFromRedirect(href, referrer) {
 const cases = [
   {
     name: "iOS return (empty referrer, clean URL)",
-    href: "https://tax.web.app/",
+    href: "https://mynote-tax.web.app/",
     referrer: "",
     legacyWouldRun: false,
   },
   {
     name: "Android return via auth handler referrer",
-    href: "https://tax.web.app/",
+    href: "https://mynote-tax.web.app/",
     referrer: "https://mynote-f1bbc.firebaseapp.com/",
     legacyWouldRun: true,
   },
   {
     name: "Google referrer only",
-    href: "https://tax.web.app/",
+    href: "https://mynote-tax.web.app/",
     referrer: "https://accounts.google.com/",
     legacyWouldRun: true,
   },
@@ -53,5 +53,5 @@ if (failed) {
 console.log("ok — legacy gate skips iOS empty-referrer; fixed path always resolves redirect");
 console.log(
   "iOS empty referrer legacyWouldRun=",
-  legacyMaybeFromRedirect("https://tax.web.app/", "")
+  legacyMaybeFromRedirect("https://mynote-tax.web.app/", "")
 );

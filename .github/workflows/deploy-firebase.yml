@@ -7,7 +7,9 @@ on:
 
 env:
   PROJECT_ID: mynote-f1bbc
-  SITE_ID: tax
+  # `tax` is reserved globally; use mynote-tax → https://mynote-tax.web.app
+  SITE_ID: mynote-tax
+  HOSTING_TARGET: tax
 
 jobs:
   deploy:
@@ -49,15 +51,25 @@ jobs:
       - name: Enable Firebase / create Hosting site
         if: steps.creds.outputs.mode == 'sa'
         run: |
+          set -euo pipefail
           gcloud config set project "$PROJECT_ID"
           gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com --project "$PROJECT_ID" || true
-          npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
-          npx firebase-tools@13 target:apply hosting tax "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
+
+          if npx firebase-tools@13 hosting:sites:list --project "$PROJECT_ID" --json 2>/dev/null \
+            | grep -q "\"name\": \"$SITE_ID\""; then
+            echo "Hosting site $SITE_ID already exists"
+          else
+            echo "Creating hosting site $SITE_ID"
+            npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --non-interactive
+          fi
+
+          npx firebase-tools@13 target:apply hosting "$HOSTING_TARGET" "$SITE_ID" \
+            --project "$PROJECT_ID" --non-interactive
 
       - name: Deploy Hosting + Firestore rules (service account)
         if: steps.creds.outputs.mode == 'sa'
         run: |
-          npx firebase-tools@13 deploy --only hosting:tax,firestore:rules \
+          npx firebase-tools@13 deploy --only hosting:${HOSTING_TARGET},firestore:rules \
             --project "$PROJECT_ID" \
             --non-interactive
 
@@ -66,12 +78,39 @@ jobs:
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive || true
-          npx firebase-tools@13 target:apply hosting tax "$SITE_ID" --project "$PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive || true
-          npx firebase-tools@13 deploy --only hosting:tax,firestore:rules \
+          set -euo pipefail
+          npx firebase-tools@13 hosting:sites:create "$SITE_ID" \
+            --project "$PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive || true
+          npx firebase-tools@13 target:apply hosting "$HOSTING_TARGET" "$SITE_ID" \
+            --project "$PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive
+          npx firebase-tools@13 deploy --only hosting:${HOSTING_TARGET},firestore:rules \
             --project "$PROJECT_ID" \
             --token "$FIREBASE_TOKEN" \
             --non-interactive
+
+      - name: Allow site on Firebase Auth authorized domains
+        if: steps.creds.outputs.mode == 'sa'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          CFG_URL="https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT_ID}/config"
+          export CURRENT="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "$CFG_URL")"
+          python3 - <<'PY' > /tmp/auth-config-patch.json
+          import json, os
+          cfg = json.loads(os.environ["CURRENT"])
+          domains = list(cfg.get("authorizedDomains") or [])
+          for d in ("mynote-tax.web.app", "mynote-tax.firebaseapp.com"):
+              if d not in domains:
+                  domains.append(d)
+          print(json.dumps({"authorizedDomains": domains}))
+          PY
+          curl -sS -X PATCH \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @/tmp/auth-config-patch.json \
+            "${CFG_URL}?updateMask=authorizedDomains"
+          echo
 
       - name: Summary
         run: |
