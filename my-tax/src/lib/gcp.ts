@@ -2,10 +2,10 @@ export const GCP_PROJECT_ID =
   process.env.GOOGLE_CLOUD_PROJECT ||
   process.env.GCLOUD_PROJECT ||
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-  "mypeer-501909";
+  "mynote-f1bbc";
 
 export const MY_TAX_BUCKET =
-  process.env.MY_TAX_GCS_BUCKET || "mypeer-501909-my-tax";
+  process.env.MY_TAX_GCS_BUCKET || "mynote-f1bbc-my-tax";
 
 export const VERTEX_LOCATION =
   process.env.VERTEX_LOCATION || "asia-southeast1";
