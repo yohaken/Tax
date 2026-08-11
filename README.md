@@ -5,7 +5,7 @@
 | แอป | โฟลเดอร์ | ลิงก์ | ทำอะไร |
 |---|---|---|---|
 | **TaxTag** | `public/` | https://mynote-tax.web.app | จัดหมวดรายการโอน Peerland / TellTea จาก statement |
-| **my-tax** | `my-tax/` | https://my-tax-570843838870.asia-southeast1.run.app | คลังยื่นแบบ ภ.ง.ด. + คำนวณภาษี + สรุปพิทเทิ้ล |
+| **my-tax** | `my-tax/` | https://mynote-mytax.web.app | คลังยื่นแบบ ภ.ง.ด. + คำนวณภาษี + สรุปพิทเทิ้ล |
 
 ทั้งคู่โฮสต์บน Firebase **`mynote-f1bbc`**
 
@@ -33,8 +33,8 @@ npm run dev        # http://localhost:3000
 
 คู่มือเต็ม: [`my-tax/README.md`](my-tax/README.md)
 
-- ยื่นแบบ: https://my-tax-570843838870.asia-southeast1.run.app/filings  
-- คำนวณภาษี: https://my-tax-570843838870.asia-southeast1.run.app/calc  
+- ยื่นแบบ: https://mynote-mytax.web.app/filings  
+- คำนวณภาษี: https://mynote-mytax.web.app/calc  
 
 Deploy: push ที่แตะ `my-tax/**` → workflow `Deploy my-tax (Cloud Run + Hosting)`
 
