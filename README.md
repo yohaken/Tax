@@ -1,48 +1,22 @@
-# Tax (monorepo)
+# TaxTag
 
-รวมงานภาษีส่วนตัว 2 แอป ใน repo เดียว — เจ้าของ `yohaken@gmail.com`
+เว็บจัดหมวดรายการโอน Peerland — โฮสต์บน **Google Firebase MyNote** (`mynote-f1bbc`)
 
-| แอป | โฟลเดอร์ | ลิงก์ | ทำอะไร |
-|---|---|---|---|
-| **TaxTag** | `public/` | https://mynote-tax.web.app | จัดหมวดรายการโอน Peerland / TellTea จาก statement |
-| **my-tax** | `my-tax/` | https://mynote-mytax.web.app | คลังยื่นแบบ ภ.ง.ด. + คำนวณภาษี + สรุปพิทเทิ้ล |
+## ลิงก์คงที่ (Google)
 
-ทั้งคู่โฮสต์บน Firebase **`mynote-f1bbc`**
+**https://mynote-tax.web.app**
 
----
+สำรอง: https://mynote-tax.firebaseapp.com
 
-## TaxTag
+- ต้องเข้าสู่ระบบด้วย Firebase Google Login: **yohaken@gmail.com**
+- จำการล็อกอินในเครื่องยาวๆ
+- ข้อมูล/กลุ่ม/Note ซิงค์ผ่าน Firebase
 
-```bash
-npm start          # http://localhost:4173
-npm run deploy     # Firebase Hosting site mynote-tax
-```
-
-**ลิงก์:** https://mynote-tax.web.app
-
-## my-tax
-
-Next.js บน Cloud Run + Firebase Hosting rewrite (`mynote-mytax`)
-
-```bash
-cd my-tax
-npm install
-cp .env.example .env.local
-npm run dev        # http://localhost:3000
-```
-
-คู่มือเต็ม: [`my-tax/README.md`](my-tax/README.md)
-
-- ยื่นแบบ: https://mynote-mytax.web.app/filings  
-- คำนวณภาษี: https://mynote-mytax.web.app/calc  
-
-Deploy: push ที่แตะ `my-tax/**` → workflow `Deploy my-tax (Cloud Run + Hosting)`
-
----
+## ความสามารถ
+- จำแนกกลุ่ม + สรุปยอดเข้า/ออก/สุทธิ
+- พิมพ์/Export แยกกลุ่ม
+- คอลัมน์ Note (เซฟอัตโนมัติ)
+- Export XLSX
 
 ## Deploy
-
-| แอป | Trigger | Secret |
-|---|---|---|
-| TaxTag | push `main` → Deploy TaxTag | `GCP_SA_KEY` |
-| my-tax | push `main` ที่เปลี่ยน `my-tax/**` | `GCP_SA_KEY` |
+โปรเจกต์ Firebase: `mynote-f1bbc` · Hosting site: `mynote-tax`

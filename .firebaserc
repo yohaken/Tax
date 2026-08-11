@@ -7,9 +7,6 @@
       "hosting": {
         "tax": [
           "mynote-tax"
-        ],
-        "mytax": [
-          "mynote-mytax"
         ]
       }
     }

@@ -24,14 +24,6 @@ service cloud.firestore {
         && request.auth.token.email == 'yohaken@gmail.com';
     }
 
-    // my-tax — agent handoff board
-    match /agentHandoff/{docId} {
-      allow read: if true;
-      allow write: if isOwner()
-        || (request.auth != null
-            && request.auth.token.email == 'yohaken@gmail.com');
-    }
-
     match /{document=**} {
       allow read, write: if false;
     }
