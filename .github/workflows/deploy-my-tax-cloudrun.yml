@@ -1,11 +1,10 @@
 name: Deploy my-tax Cloud Run
 
+# Manual only for now: GCP_SA_KEY on this repo is mynote-f1bbc
+# (pnote-github-deploy) and cannot enable APIs on mypeer-501909.
+# Re-enable push trigger after granting that SA access to mypeer, or
+# after migrating my-tax Cloud Run onto mynote-f1bbc.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "my-tax/**"
-      - ".github/workflows/deploy-my-tax-cloudrun.yml"
   workflow_dispatch:
 
 env:
