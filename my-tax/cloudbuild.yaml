@@ -1,0 +1,23 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyD_b7TASutFOmoUKskH6yLjmxJzVpTUIn4
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=mypeer-501909.firebaseapp.com
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=mypeer-501909
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=mypeer-501909.firebasestorage.app
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=470549580687
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_APP_ID=1:470549580687:web:5447b1c7b95e991ab719fa
+      - -t
+      - $_IMAGE
+      - .
+images:
+  - $_IMAGE
+options:
+  logging: CLOUD_LOGGING_ONLY
