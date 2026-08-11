@@ -98,7 +98,8 @@ jobs:
             --project "$PROJECT_ID" --non-interactive || true
           npx --yes firebase-tools@13 target:apply hosting mytax "$SITE_ID" \
             --project "$PROJECT_ID" --non-interactive
-          npx --yes firebase-tools@13 deploy --only hosting:mytax,firestore:rules,storage \
+          # Skip storage rules until Firebase Storage is initialized in console.
+          npx --yes firebase-tools@13 deploy --only hosting:mytax,firestore:rules \
             --project "$PROJECT_ID" --non-interactive
 
       - name: Allow mynote-mytax.web.app on Auth domains

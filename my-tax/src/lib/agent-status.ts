@@ -24,7 +24,7 @@ const REQUIRED_REFS = [
   "P900015273022",
 ];
 
-const LIVE = "https://mynote-mytax.web.app";
+const LIVE = "https://my-tax-570843838870.asia-southeast1.run.app";
 
 export const DEFAULT_LOCAL_COMMAND = `# งาน Local Mac — อัปโหลด PDF เข้า LIVE ให้ถาวร (GCS)
 Live: ${LIVE}/?agent=1

@@ -1,7 +1,7 @@
 # my-tax
 
 > อยู่ใน monorepo **[yohaken/Tax](https://github.com/yohaken/Tax)** โฟลเดอร์ `my-tax/`  
-> Live: **https://mynote-mytax.web.app** · คู่กับ TaxTag: https://mynote-tax.web.app
+> Live: **https://my-tax-570843838870.asia-southeast1.run.app** · คู่กับ TaxTag: https://mynote-tax.web.app
 
 ระบบจัดการข้อมูลภาษีส่วนตัว จากหน้า [RD form-status](https://efiling.rd.go.th/rd-efiling-web/form-status)
 
