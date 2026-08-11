@@ -5,8 +5,8 @@
   "targets": {
     "mynote-f1bbc": {
       "hosting": {
-        "taxtag": [
-          "taxtag"
+        "tax": [
+          "tax"
         ]
       }
     }

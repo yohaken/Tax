@@ -60,7 +60,7 @@ function sanitizeConfig(raw) {
 /**
  * Keep Firebase default authDomain — only
  * https://mynote-f1bbc.firebaseapp.com/__/auth/handler is registered
- * on the Google OAuth client. taxtag.web.app URIs → redirect_uri_mismatch.
+ * on the Google OAuth client. tax.web.app URIs → redirect_uri_mismatch.
  */
 export function resolveAuthDomain() {
   return PROJECT_DEFAULTS.authDomain;
@@ -215,8 +215,8 @@ async function startRedirectLogin(provider) {
 /**
  * Mobile must use popup first.
  * signInWithRedirect returns without a session on Safari/Chrome that block
- * third-party storage when authDomain ≠ taxtag.web.app — and switching
- * authDomain to taxtag.web.app causes redirect_uri_mismatch (handler URI
+ * third-party storage when authDomain ≠ tax.web.app — and switching
+ * authDomain to tax.web.app causes redirect_uri_mismatch (handler URI
  * not registered on the Google OAuth client).
  */
 export async function loginWithGoogle() {

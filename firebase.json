@@ -3,7 +3,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
-    "target": "taxtag",
+    "target": "tax",
     "public": "public",
     "ignore": [
       "firebase.json",

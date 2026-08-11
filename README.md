@@ -1,12 +1,12 @@
 # TaxTag
 
-เว็บจัดหมวดรายการโอน Peerland — โฮสต์บน **Google Firebase** เท่านั้น
+เว็บจัดหมวดรายการโอน Peerland — โฮสต์บน **Google Firebase MyNote** (`mynote-f1bbc`)
 
 ## ลิงก์คงที่ (Google)
 
-**https://taxtag.web.app**
+**https://tax.web.app**
 
-สำรอง: https://taxtag.firebaseapp.com
+สำรอง: https://tax.firebaseapp.com
 
 - ต้องเข้าสู่ระบบด้วย Firebase Google Login: **yohaken@gmail.com**
 - จำการล็อกอินในเครื่องยาวๆ
@@ -20,4 +20,4 @@
 - Export XLSX
 
 ## Deploy
-โปรเจกต์ Firebase: `mynote-f1bbc` · Hosting site: `taxtag`
+โปรเจกต์ Firebase: `mynote-f1bbc` · Hosting site: `tax` · ลิงก์คงที่: https://tax.web.app
