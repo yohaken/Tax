@@ -1,7 +1,7 @@
 /** Mobile login must open Google OAuth without redirect_uri_mismatch (popup path). */
 import puppeteer from "puppeteer-core";
 
-const LIVE = process.env.TAXTAG_URL || "https://tax.web.app/";
+const LIVE = process.env.TAXTAG_URL || "https://mynote-tax.web.app/";
 const EXPECT_VERSION = Number(process.env.EXPECT_VERSION || 52);
 const CHROME = process.env.CHROME_PATH || "/usr/local/bin/google-chrome";
 

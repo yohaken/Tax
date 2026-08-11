@@ -4,9 +4,11 @@
 
 ## ลิงก์คงที่ (Google)
 
-**https://tax.web.app**
+**https://mynote-tax.web.app**
 
-สำรอง: https://tax.firebaseapp.com
+สำรอง: https://mynote-tax.firebaseapp.com
+
+> หมายเหตุ: `tax.web.app` ถูกจองโดยโปรเจกต์ Firebase อื่นแล้ว จึงใช้ `mynote-tax`
 
 - ต้องเข้าสู่ระบบด้วย Firebase Google Login: **yohaken@gmail.com**
 - จำการล็อกอินในเครื่องยาวๆ
@@ -20,4 +22,4 @@
 - Export XLSX
 
 ## Deploy
-โปรเจกต์ Firebase: `mynote-f1bbc` · Hosting site: `tax` · ลิงก์คงที่: https://tax.web.app
+โปรเจกต์ Firebase: `mynote-f1bbc` · Hosting site: `mynote-tax` · ลิงก์คงที่: https://mynote-tax.web.app

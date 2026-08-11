@@ -1,7 +1,7 @@
 /**
  * Real login E2E — signs in as yohaken@gmail.com with a Firebase custom token,
  * asserts the login gate clears, then verifies mobile Google OAuth redirect_uri
- * is same-site (tax.web.app/__/auth/handler) so iOS Safari can complete login.
+ * is same-site (mynote-tax.web.app/__/auth/handler) so iOS Safari can complete login.
  *
  * Usage:
  *   CUSTOM_TOKEN_FILE=/tmp/firebase-login/custom_token.txt \
@@ -12,7 +12,7 @@ import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 import path from "node:path";
 
-const LIVE = process.env.TAXTAG_URL || "https://tax.web.app/";
+const LIVE = process.env.TAXTAG_URL || "https://mynote-tax.web.app/";
 const OUT = process.env.E2E_OUT || "/opt/cursor/artifacts/screenshots";
 const CHROME = process.env.CHROME_PATH || "/usr/local/bin/google-chrome";
 const TOKEN_FILE = process.env.CUSTOM_TOKEN_FILE || "/tmp/firebase-login/custom_token.txt";

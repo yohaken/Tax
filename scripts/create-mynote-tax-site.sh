@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-mynote-f1bbc}"
-SITE_ID="${SITE_ID:-tax}"
+SITE_ID="${SITE_ID:-mynote-tax}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
