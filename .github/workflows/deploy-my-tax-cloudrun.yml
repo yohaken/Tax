@@ -1,0 +1,74 @@
+name: Deploy my-tax Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "my-tax/**"
+      - ".github/workflows/deploy-my-tax-cloudrun.yml"
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: mypeer-501909
+  REGION: asia-southeast1
+  SERVICE: my-tax
+  REPO: my-tax
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: my-tax
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enable APIs
+        run: |
+          gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com --project "$PROJECT_ID"
+
+      - name: Ensure Artifact Registry
+        run: |
+          gcloud artifacts repositories describe "$REPO" --location="$REGION" --project="$PROJECT_ID" \
+            || gcloud artifacts repositories create "$REPO" \
+              --repository-format=docker \
+              --location="$REGION" \
+              --description="my-tax images" \
+              --project="$PROJECT_ID"
+
+      - name: Build and push
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${GITHUB_SHA}"
+          gcloud builds submit --tag "$IMAGE" --project "$PROJECT_ID"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --memory 512Mi \
+            --cpu 1 \
+            --max-instances 3 \
+            --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MY_TAX_GCS_BUCKET=mypeer-501909-my-tax,MY_TAX_REQUIRE_GCS=1,VERTEX_LOCATION=asia-southeast1,VERTEX_MODEL=gemini-2.5-flash" \
+            --project "$PROJECT_ID"
+
+      - name: Print URL
+        run: |
+          gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --format='value(status.url)'
