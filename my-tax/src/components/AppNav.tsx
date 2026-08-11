@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/", label: "รายการ" },
+  { href: "/filings", label: "ยื่นแบบ" },
   { href: "/calc", label: "คำนวณภาษี" },
 ] as const;
 
@@ -15,7 +15,7 @@ export function AppNav() {
     <nav className="app-nav" aria-label="เมนูหลัก">
       {TABS.map((tab) => {
         const active =
-          tab.href === "/"
+          tab.href === "/filings"
             ? pathname === "/" ||
               pathname.startsWith("/filings") ||
               pathname.startsWith("/years") ||
