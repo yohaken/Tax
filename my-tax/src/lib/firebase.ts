@@ -9,32 +9,29 @@ import {
 } from "firebase/auth";
 import { ALLOWED_EMAIL } from "./types";
 
-/** Client config — ค่าเริ่มต้นเป็น Firebase web app `my-tax` ในโปรเจกต์ส่วนตัว */
+/** Client config — shared MyNote Firebase (same as TaxTag / P-Note) */
 const firebaseConfig = {
   apiKey:
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
-    "AIzaSyD_b7TASutFOmoUKskH6yLjmxJzVpTUIn4",
+    "AIzaSyAswz15_kbwp0owNI0R2_6x8YoNHmZfeeI",
   authDomain:
     process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||
-    "mypeer-501909.firebaseapp.com",
+    "mynote-f1bbc.firebaseapp.com",
   projectId:
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "mypeer-501909",
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "mynote-f1bbc",
   storageBucket:
     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-    "mypeer-501909.firebasestorage.app",
+    "mynote-f1bbc.firebasestorage.app",
   messagingSenderId:
-    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "470549580687",
-  appId:
-    process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||
-    "1:470549580687:web:5447b1c7b95e991ab719fa",
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "570843838870",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
 };
 
 export function isFirebaseConfigured() {
   return Boolean(
     firebaseConfig.apiKey &&
       firebaseConfig.authDomain &&
-      firebaseConfig.projectId &&
-      firebaseConfig.appId,
+      firebaseConfig.projectId,
   );
 }
 

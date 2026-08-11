@@ -9,7 +9,7 @@
  */
 const BASE =
   process.env.MY_TAX_BASE ||
-  "https://my-tax-470549580687.asia-southeast1.run.app";
+  "https://mynote-mytax.web.app";
 
 const [cmd = "get", by, state, ...summaryParts] = process.argv.slice(2);
 const summary = summaryParts.join(" ").trim();

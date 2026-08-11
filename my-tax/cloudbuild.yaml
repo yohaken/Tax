@@ -3,17 +3,17 @@ steps:
     args:
       - build
       - --build-arg
-      - NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyD_b7TASutFOmoUKskH6yLjmxJzVpTUIn4
+      - NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyAswz15_kbwp0owNI0R2_6x8YoNHmZfeeI
       - --build-arg
-      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=mypeer-501909.firebaseapp.com
+      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=mynote-f1bbc.firebaseapp.com
       - --build-arg
-      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=mypeer-501909
+      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=mynote-f1bbc
       - --build-arg
-      - NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=mypeer-501909.firebasestorage.app
+      - NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=mynote-f1bbc.firebasestorage.app
       - --build-arg
-      - NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=470549580687
+      - NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=570843838870
       - --build-arg
-      - NEXT_PUBLIC_FIREBASE_APP_ID=1:470549580687:web:5447b1c7b95e991ab719fa
+      - NEXT_PUBLIC_FIREBASE_APP_ID=
       - -t
       - $_IMAGE
       - .

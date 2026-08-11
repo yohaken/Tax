@@ -13,7 +13,7 @@ const PROJECT_ID =
   process.env.GOOGLE_CLOUD_PROJECT ||
   process.env.GCLOUD_PROJECT ||
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-  "mypeer-501909";
+  "mynote-f1bbc";
 
 const REQUIRED_REFS = [
   "P940004519103",
@@ -24,7 +24,7 @@ const REQUIRED_REFS = [
   "P900015273022",
 ];
 
-const LIVE = "https://my-tax-470549580687.asia-southeast1.run.app";
+const LIVE = "https://mynote-mytax.web.app";
 
 export const DEFAULT_LOCAL_COMMAND = `# งาน Local Mac — อัปโหลด PDF เข้า LIVE ให้ถาวร (GCS)
 Live: ${LIVE}/?agent=1

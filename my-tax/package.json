@@ -10,7 +10,7 @@
     "scrape:form-status": "node scripts/scrape-form-status.mjs",
     "import:seed": "node scripts/import-seed.mjs",
     "import:pdfs": "node scripts/import-pdfs.mjs",
-    "import:pdfs:live": "MY_TAX_BASE=https://my-tax-470549580687.asia-southeast1.run.app node scripts/import-pdfs.mjs",
+    "import:pdfs:live": "MY_TAX_BASE=https://mynote-mytax.web.app node scripts/import-pdfs.mjs",
     "agent:status": "node scripts/agent-status.mjs",
     "agent:status:get": "node scripts/agent-status.mjs get"
   },
