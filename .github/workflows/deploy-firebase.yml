@@ -55,13 +55,9 @@ jobs:
           gcloud config set project "$PROJECT_ID"
           gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com --project "$PROJECT_ID" || true
 
-          if npx firebase-tools@13 hosting:sites:list --project "$PROJECT_ID" --json 2>/dev/null \
-            | grep -q "\"name\": \"$SITE_ID\""; then
-            echo "Hosting site $SITE_ID already exists"
-          else
-            echo "Creating hosting site $SITE_ID"
-            npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --non-interactive
-          fi
+          # Create is best-effort: site may already exist (409).
+          npx firebase-tools@13 hosting:sites:create "$SITE_ID" \
+            --project "$PROJECT_ID" --non-interactive || true
 
           npx firebase-tools@13 target:apply hosting "$HOSTING_TARGET" "$SITE_ID" \
             --project "$PROJECT_ID" --non-interactive
