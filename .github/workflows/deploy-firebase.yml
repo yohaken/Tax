@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  PROJECT_ID: mypeer-501909
-  SITE_ID: taxtag
+  PROJECT_ID: mynote-f1bbc
+  SITE_ID: tax
 
 jobs:
   deploy:
@@ -52,12 +52,12 @@ jobs:
           gcloud config set project "$PROJECT_ID"
           gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com --project "$PROJECT_ID" || true
           npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
-          npx firebase-tools@13 target:apply hosting taxtag "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
+          npx firebase-tools@13 target:apply hosting tax "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
 
       - name: Deploy Hosting + Firestore rules (service account)
         if: steps.creds.outputs.mode == 'sa'
         run: |
-          npx firebase-tools@13 deploy --only hosting:taxtag,firestore:rules \
+          npx firebase-tools@13 deploy --only hosting:tax,firestore:rules \
             --project "$PROJECT_ID" \
             --non-interactive
 
@@ -66,8 +66,9 @@ jobs:
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          npx firebase-tools@13 target:apply hosting taxtag "$SITE_ID" --project "$PROJECT_ID" --non-interactive || true
-          npx firebase-tools@13 deploy --only hosting:taxtag,firestore:rules \
+          npx firebase-tools@13 hosting:sites:create "$SITE_ID" --project "$PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive || true
+          npx firebase-tools@13 target:apply hosting tax "$SITE_ID" --project "$PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive || true
+          npx firebase-tools@13 deploy --only hosting:tax,firestore:rules \
             --project "$PROJECT_ID" \
             --token "$FIREBASE_TOKEN" \
             --non-interactive
@@ -75,8 +76,9 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## TaxTag on Google"
+            echo "## TaxTag permanent link (MyNote Firebase)"
             echo "- App: https://${SITE_ID}.web.app"
             echo "- Also: https://${SITE_ID}.firebaseapp.com"
+            echo "- Project: ${PROJECT_ID}"
             echo "- Build: see public/js/build.js"
           } >> "$GITHUB_STEP_SUMMARY"

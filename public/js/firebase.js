@@ -22,15 +22,15 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
-/** Same Google Firebase project as P-Note — login once, stay signed in. */
+/** Same Google Firebase project as P-Note (MyNote) — login once, stay signed in. */
 export const ALLOWED_EMAIL = "yohaken@gmail.com";
 
 const PROJECT_DEFAULTS = {
-  apiKey: "AIzaSyD_b7TASutFOmoUKskH6yLjmxJzVpTUIn4",
-  authDomain: "mypeer-501909.firebaseapp.com",
-  projectId: "mypeer-501909",
-  storageBucket: "mypeer-501909.firebasestorage.app",
-  messagingSenderId: "470549580687",
+  apiKey: "AIzaSyAswz15_kbwp0owNI0R2_6x8YoNHmZfeeI",
+  authDomain: "mynote-f1bbc.firebaseapp.com",
+  projectId: "mynote-f1bbc",
+  storageBucket: "mynote-f1bbc.firebasestorage.app",
+  messagingSenderId: "570843838870",
 };
 
 const OAUTH_REDIRECT_FLAG = "taxtag-oauth-redirect";
@@ -59,8 +59,8 @@ function sanitizeConfig(raw) {
 
 /**
  * Keep Firebase default authDomain — only
- * https://mypeer-501909.firebaseapp.com/__/auth/handler is registered
- * on the Google OAuth client. taxtag.web.app URIs → redirect_uri_mismatch.
+ * https://mynote-f1bbc.firebaseapp.com/__/auth/handler is registered
+ * on the Google OAuth client. tax.web.app URIs → redirect_uri_mismatch.
  */
 export function resolveAuthDomain() {
   return PROJECT_DEFAULTS.authDomain;
@@ -215,8 +215,8 @@ async function startRedirectLogin(provider) {
 /**
  * Mobile must use popup first.
  * signInWithRedirect returns without a session on Safari/Chrome that block
- * third-party storage when authDomain ≠ taxtag.web.app — and switching
- * authDomain to taxtag.web.app causes redirect_uri_mismatch (handler URI
+ * third-party storage when authDomain ≠ tax.web.app — and switching
+ * authDomain to tax.web.app causes redirect_uri_mismatch (handler URI
  * not registered on the Google OAuth client).
  */
 export async function loginWithGoogle() {

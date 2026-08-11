@@ -1,7 +1,7 @@
 /** Mobile login must open Google OAuth without redirect_uri_mismatch (popup path). */
 import puppeteer from "puppeteer-core";
 
-const LIVE = process.env.TAXTAG_URL || "https://taxtag.web.app/";
+const LIVE = process.env.TAXTAG_URL || "https://tax.web.app/";
 const EXPECT_VERSION = Number(process.env.EXPECT_VERSION || 52);
 const CHROME = process.env.CHROME_PATH || "/usr/local/bin/google-chrome";
 
@@ -40,7 +40,7 @@ console.log("pages", urls.map((u) => u.slice(0, 180)));
 const joined = urls.join("\n");
 const mismatch = /redirect_uri_mismatch|authError=/i.test(joined);
 const google = /accounts\.google\.com/i.test(joined);
-const handler = /mypeer-501909\.firebaseapp\.com%2F__%2Fauth%2Fhandler|mypeer-501909\.firebaseapp\.com\/__\/auth\/handler/i.test(joined);
+const handler = /mynote-f1bbc\.firebaseapp\.com%2F__%2Fauth%2Fhandler|mynote-f1bbc\.firebaseapp\.com\/__\/auth\/handler/i.test(joined);
 
 if (!google) {
   console.error("FAIL did not open Google");

@@ -1,10 +1,31 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'yohaken@gmail.com';
+    }
+
+    // P-Note (MyNote) — personal notes payload
+    match /spaces/{spaceId} {
+      allow read, write: if isOwner();
+    }
+
+    // TellTea login tickets — owner only
+    match /loginTickets/{ticketId} {
+      allow read, write: if isOwner();
+    }
+
+    // TaxTag — per-user workspace sync
     match /taxtag/{uid} {
       allow read, write: if request.auth != null
         && request.auth.uid == uid
         && request.auth.token.email == 'yohaken@gmail.com';
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
