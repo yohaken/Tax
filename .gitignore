@@ -5,17 +5,3 @@ firebase-debug.*.log
 *.local
 .DS_Store
 dist/
-
-# my-tax (Next.js)
-my-tax/node_modules/
-my-tax/.next/
-my-tax/out/
-my-tax/.env*
-!my-tax/.env.example
-my-tax/data/seed/**
-!my-tax/data/seed/.gitkeep
-my-tax/data/agent-status.json
-my-tax/data/docs/**/*.txt
-my-tax/.vercel
-my-tax/*.tsbuildinfo
-my-tax/next-env.d.ts

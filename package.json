@@ -1,14 +1,12 @@
 {
-  "name": "tax-monorepo",
+  "name": "taxtag",
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "TaxTag (statement categorizer) + my-tax (RD filings) — personal tax tools",
+  "description": "Personal bank statement categorizer — import PDF/Excel, smart search, tag transfers",
   "scripts": {
     "start": "npx --yes serve public -p 4173",
     "deploy": "npx --yes firebase-tools deploy --only hosting",
-    "my-tax:dev": "npm run dev --prefix my-tax",
-    "my-tax:install": "npm install --prefix my-tax",
     "test:mobile-login": "node scripts/e2e-mobile-login.mjs",
     "test:real-login": "node scripts/e2e-real-login.mjs",
     "test:redirect-gate": "node scripts/test-mobile-redirect-gate.mjs"
