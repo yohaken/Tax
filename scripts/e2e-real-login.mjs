@@ -78,7 +78,7 @@ async function main() {
       host: location.hostname,
     };
   });
-  if (authDomain.resolved === "mypeer-501909.firebaseapp.com") {
+  if (authDomain.resolved === "mynote-f1bbc.firebaseapp.com") {
     pass("authDomain-firebase-default", authDomain.resolved);
   } else {
     fail("authDomain-firebase-default", JSON.stringify(authDomain));
@@ -179,13 +179,13 @@ async function main() {
     (/accounts\.google\.com/i.test(urls) || /accounts\.google\.com/i.test(page.url())) &&
     !/authError=|redirect_uri_mismatch/i.test(urls);
   const handlerOk =
-    /redirect_uri=https%3A%2F%2Fmypeer-501909\.firebaseapp\.com%2F__%2Fauth%2Fhandler/i.test(urls) ||
-    /redirect_uri=https:\/\/mypeer-501909\.firebaseapp\.com\/__\/auth\/handler/i.test(urls);
+    /redirect_uri=https%3A%2F%2Fmynote-f1bbc\.firebaseapp\.com%2F__%2Fauth%2Fhandler/i.test(urls) ||
+    /redirect_uri=https:\/\/mynote-f1bbc\.firebaseapp\.com\/__\/auth\/handler/i.test(urls);
 
   if (oauthOk) pass("google-oauth-opens", urls.slice(0, 180));
   else fail("google-oauth-opens", `from ${before} → ${urls.slice(0, 300)}`);
 
-  if (handlerOk) pass("oauth-redirect-uri-registered", "mypeer-501909.firebaseapp.com/__/auth/handler");
+  if (handlerOk) pass("oauth-redirect-uri-registered", "mynote-f1bbc.firebaseapp.com/__/auth/handler");
   else {
     const m = urls.match(/redirect_uri=([^&]+)/);
     fail("oauth-redirect-uri-registered", m ? decodeURIComponent(m[1]) : urls.slice(0, 300));

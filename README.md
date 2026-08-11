@@ -11,6 +11,7 @@
 - ต้องเข้าสู่ระบบด้วย Firebase Google Login: **yohaken@gmail.com**
 - จำการล็อกอินในเครื่องยาวๆ
 - ข้อมูล/กลุ่ม/Note ซิงค์ผ่าน Firebase
+- โปรเจกต์เดียวกับ P-Note (MyNote): `mynote-f1bbc`
 
 ## ความสามารถ
 - จำแนกกลุ่ม + สรุปยอดเข้า/ออก/สุทธิ
@@ -19,4 +20,4 @@
 - Export XLSX
 
 ## Deploy
-โปรเจกต์ Firebase: `mypeer-501909` · Hosting site: `taxtag`
+โปรเจกต์ Firebase: `mynote-f1bbc` · Hosting site: `taxtag`

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  PROJECT_ID: mypeer-501909
+  PROJECT_ID: mynote-f1bbc
   SITE_ID: taxtag
 
 jobs:

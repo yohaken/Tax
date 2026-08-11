@@ -20,7 +20,7 @@ const cases = [
   {
     name: "Android return via auth handler referrer",
     href: "https://taxtag.web.app/",
-    referrer: "https://mypeer-501909.firebaseapp.com/",
+    referrer: "https://mynote-f1bbc.firebaseapp.com/",
     legacyWouldRun: true,
   },
   {

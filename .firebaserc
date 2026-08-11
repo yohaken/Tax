@@ -1,9 +1,9 @@
 {
   "projects": {
-    "default": "mypeer-501909"
+    "default": "mynote-f1bbc"
   },
   "targets": {
-    "mypeer-501909": {
+    "mynote-f1bbc": {
       "hosting": {
         "taxtag": [
           "taxtag"
