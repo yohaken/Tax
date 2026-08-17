@@ -1119,6 +1119,53 @@ body.is-col-resizing {
   font-weight: 600;
 }
 
+.tax-expense-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.tax-expense-chip {
+  border: 1px solid var(--line);
+  background: color-mix(in oklab, var(--cream-1) 85%, white);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.32rem 0.65rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tax-expense-chip:hover {
+  color: var(--ink);
+}
+
+.tax-expense-chip.is-active {
+  background: var(--ink);
+  color: #f7f6f2;
+  border-color: var(--ink);
+}
+
+.tax-expense-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+
+.tax-expense-custom .tax-calc-input {
+  width: 7rem;
+}
+
+.tax-expense-summary {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
 .tax-calc {
   display: grid;
   gap: 0.5rem;

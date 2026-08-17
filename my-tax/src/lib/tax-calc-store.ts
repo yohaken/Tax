@@ -1,4 +1,5 @@
 import type { TaxPeriod } from "@/lib/tax-deductions";
+import type { ExpenseMode } from "@/lib/tax-expense";
 
 export type IncomeRow = {
   id: string;
@@ -9,18 +10,22 @@ export type IncomeRow = {
 export type PeriodSlice = {
   incomes: IncomeRow[];
   deductions: Record<string, number>;
+  expenseMode: ExpenseMode;
+  customExpensePct: number;
+  customExpenseAmount: number;
 };
 
 export type TaxCalcDraft = {
-  version: 2;
+  version: 3;
   /** ทั้งปี หรือครึ่งปี (ภ.ง.ด.94) — สลับโหมดโดยไม่ปนรายได้ */
   period: TaxPeriod;
   byPeriod: Record<TaxPeriod, PeriodSlice>;
   updatedAt: string;
 };
 
-const STORAGE_KEY = "my-tax-calc-draft-v2";
-const LEGACY_STORAGE_KEY = "my-tax-calc-draft-v1";
+const STORAGE_KEY = "my-tax-calc-draft-v3";
+const LEGACY_V2_KEY = "my-tax-calc-draft-v2";
+const LEGACY_V1_KEY = "my-tax-calc-draft-v1";
 
 function newId() {
   return `inc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -34,20 +39,28 @@ export function defaultIncomeRows(): IncomeRow[] {
   ];
 }
 
-function emptySlice(): PeriodSlice {
+function defaultExpenseMode(period: TaxPeriod): ExpenseMode {
+  // ภ.ง.ด.94 มักเป็น 40(5)–40(8) → เหมา 60% เป็นค่าเริ่มต้นที่สมเหตุสมผล
+  return period === "midyear" ? "flat60" : "salary50cap100k";
+}
+
+function emptySlice(period: TaxPeriod = "annual"): PeriodSlice {
   return {
     incomes: defaultIncomeRows(),
     deductions: {},
+    expenseMode: defaultExpenseMode(period),
+    customExpensePct: 60,
+    customExpenseAmount: 0,
   };
 }
 
 export function defaultDraft(): TaxCalcDraft {
   return {
-    version: 2,
+    version: 3,
     period: "annual",
     byPeriod: {
-      annual: emptySlice(),
-      midyear: emptySlice(),
+      annual: emptySlice("annual"),
+      midyear: emptySlice("midyear"),
     },
     updatedAt: new Date().toISOString(),
   };
@@ -55,6 +68,21 @@ export function defaultDraft(): TaxCalcDraft {
 
 function normalizePeriod(value: unknown): TaxPeriod {
   return value === "midyear" ? "midyear" : "annual";
+}
+
+function normalizeExpenseMode(value: unknown, period: TaxPeriod): ExpenseMode {
+  const allowed: ExpenseMode[] = [
+    "none",
+    "flat60",
+    "flat30",
+    "salary50cap100k",
+    "customPct",
+    "customAmount",
+  ];
+  if (typeof value === "string" && (allowed as string[]).includes(value)) {
+    return value as ExpenseMode;
+  }
+  return defaultExpenseMode(period);
 }
 
 function normalizeRows(raw: unknown): IncomeRow[] {
@@ -80,16 +108,19 @@ function normalizeDeductions(raw: unknown): Record<string, number> {
   return next;
 }
 
-function normalizeSlice(raw: unknown): PeriodSlice {
+function normalizeSlice(raw: unknown, period: TaxPeriod): PeriodSlice {
   const s = (raw || {}) as Partial<PeriodSlice>;
   return {
     incomes: normalizeRows(s.incomes),
     deductions: normalizeDeductions(s.deductions),
+    expenseMode: normalizeExpenseMode(s.expenseMode, period),
+    customExpensePct: Math.min(100, Math.max(0, Number(s.customExpensePct) || 60)),
+    customExpenseAmount: Math.max(0, Number(s.customExpenseAmount) || 0),
   };
 }
 
 export function activeSlice(draft: TaxCalcDraft): PeriodSlice {
-  return draft.byPeriod[draft.period] || emptySlice();
+  return draft.byPeriod[draft.period] || emptySlice(draft.period);
 }
 
 export function activeIncomes(draft: TaxCalcDraft): IncomeRow[] {
@@ -105,7 +136,7 @@ function withActiveSlice(
   patch: Partial<PeriodSlice>,
 ): TaxCalcDraft {
   const period = draft.period;
-  const prev = draft.byPeriod[period] || emptySlice();
+  const prev = draft.byPeriod[period] || emptySlice(period);
   return {
     ...draft,
     byPeriod: {
@@ -113,12 +144,16 @@ function withActiveSlice(
       [period]: {
         incomes: patch.incomes ?? prev.incomes,
         deductions: patch.deductions ?? prev.deductions,
+        expenseMode: patch.expenseMode ?? prev.expenseMode,
+        customExpensePct: patch.customExpensePct ?? prev.customExpensePct,
+        customExpenseAmount:
+          patch.customExpenseAmount ?? prev.customExpenseAmount,
       },
     },
   };
 }
 
-function migrateLegacy(raw: string): TaxCalcDraft | null {
+function migrateLegacyV1(raw: string): TaxCalcDraft | null {
   try {
     const parsed = JSON.parse(raw) as {
       period?: unknown;
@@ -130,14 +165,16 @@ function migrateLegacy(raw: string): TaxCalcDraft | null {
     const annualIncomes = normalizeRows(parsed.incomes);
     const annualDeductions = normalizeDeductions(parsed.deductions);
     return {
-      version: 2,
+      version: 3,
       period,
       byPeriod: {
         annual: {
+          ...emptySlice("annual"),
           incomes: period === "annual" ? annualIncomes : defaultIncomeRows(),
           deductions: period === "annual" ? annualDeductions : {},
         },
         midyear: {
+          ...emptySlice("midyear"),
           incomes: period === "midyear" ? annualIncomes : defaultIncomeRows(),
           deductions: period === "midyear" ? annualDeductions : {},
         },
@@ -149,31 +186,57 @@ function migrateLegacy(raw: string): TaxCalcDraft | null {
   }
 }
 
+function migrateV2(raw: string): TaxCalcDraft | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<TaxCalcDraft> & {
+      byPeriod?: Record<string, Partial<PeriodSlice>>;
+    };
+    if (!parsed.byPeriod) return null;
+    return {
+      version: 3,
+      period: normalizePeriod(parsed.period),
+      byPeriod: {
+        annual: normalizeSlice(parsed.byPeriod.annual, "annual"),
+        midyear: normalizeSlice(parsed.byPeriod.midyear, "midyear"),
+      },
+      updatedAt: parsed.updatedAt || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function loadTaxCalcDraft(): TaxCalcDraft {
   if (typeof window === "undefined") return defaultDraft();
   try {
-    const rawV2 = localStorage.getItem(STORAGE_KEY);
-    if (rawV2) {
-      const parsed = JSON.parse(rawV2) as Partial<TaxCalcDraft> & {
-        incomes?: unknown;
-        deductions?: unknown;
-      };
+    const rawV3 = localStorage.getItem(STORAGE_KEY);
+    if (rawV3) {
+      const parsed = JSON.parse(rawV3) as Partial<TaxCalcDraft>;
       if (parsed.byPeriod) {
         return {
-          version: 2,
+          version: 3,
           period: normalizePeriod(parsed.period),
           byPeriod: {
-            annual: normalizeSlice(parsed.byPeriod.annual),
-            midyear: normalizeSlice(parsed.byPeriod.midyear),
+            annual: normalizeSlice(parsed.byPeriod.annual, "annual"),
+            midyear: normalizeSlice(parsed.byPeriod.midyear, "midyear"),
           },
           updatedAt: parsed.updatedAt || new Date().toISOString(),
         };
       }
     }
 
-    const rawV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
+    const rawV2 = localStorage.getItem(LEGACY_V2_KEY);
+    if (rawV2) {
+      const migrated = migrateV2(rawV2);
+      if (migrated) {
+        saveTaxCalcDraft(migrated);
+        return migrated;
+      }
+    }
+
+    const rawV1 = localStorage.getItem(LEGACY_V1_KEY);
     if (rawV1) {
-      const migrated = migrateLegacy(rawV1);
+      const migrated = migrateLegacyV1(rawV1);
       if (migrated) {
         saveTaxCalcDraft(migrated);
         return migrated;
@@ -188,11 +251,11 @@ export function loadTaxCalcDraft(): TaxCalcDraft {
 export function saveTaxCalcDraft(draft: TaxCalcDraft) {
   if (typeof window === "undefined") return;
   const next: TaxCalcDraft = {
-    version: 2,
+    version: 3,
     period: normalizePeriod(draft.period),
     byPeriod: {
-      annual: normalizeSlice(draft.byPeriod?.annual),
-      midyear: normalizeSlice(draft.byPeriod?.midyear),
+      annual: normalizeSlice(draft.byPeriod?.annual, "annual"),
+      midyear: normalizeSlice(draft.byPeriod?.midyear, "midyear"),
     },
     updatedAt: new Date().toISOString(),
   };
@@ -235,6 +298,15 @@ export function updateActiveDeductions(
   const next = { ...deductions };
   delete next.personal;
   return withActiveSlice(draft, { deductions: next });
+}
+
+export function updateExpense(
+  draft: TaxCalcDraft,
+  patch: Partial<
+    Pick<PeriodSlice, "expenseMode" | "customExpensePct" | "customExpenseAmount">
+  >,
+): TaxCalcDraft {
+  return withActiveSlice(draft, patch);
 }
 
 export function setDraftPeriod(

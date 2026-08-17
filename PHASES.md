@@ -15,13 +15,20 @@
 - [x] `mynote-mytax.web.app` → 301 redirect ไป hub
 - [x] Build bump → **v70**
 
-## Phase 7 — Deploy & verify ⬜
+## Phase 7 — Deploy & verify ✅
 
-- [ ] CI deploy TaxTag + my-tax rewrites
-- [ ] `npm run test:smoke-hub` (EXPECT_VERSION=70)
-- [ ] ทดสอบ login Google บน `/filings` และ `/calc`
+- [x] CI deploy TaxTag + my-tax rewrites (v70)
+- [x] `npm run test:smoke-hub` (EXPECT_VERSION=70)
+- [ ] ทดสอบ login Google บน `/filings` และ `/calc` (manual)
 
-## Phase 8 — ข้อมูล & workflow (ถัดไป) ⬜
+## Phase 8 — Fix personal tax calc (หักค่าใช้จ่าย) ✅
+
+- [x] ลำดับถูก: เงินได้ → **ค่าใช้จ่าย** → ลดหย่อน → สุทธิ → ขั้นบันได
+- [x] ครึ่งปี (ภ.ง.ด.94): เหมา 60% default · ลดหย่อน÷2 · อัตราขั้นบันไดชุดเดิม
+- [x] Regression ข้อ 6–7: 400k เหมา60% ส่วนตัว30k → สุทธิ 130k → ภาษี 0
+- [x] ทั้งปี: เงินเดือน 50% เพดาน 100k
+
+## Phase 9 — ข้อมูล & workflow (ถัดไป) ⬜
 
 - [ ] Scrape form-status จาก RD
 - [ ] Import PDF เข้าคลัง

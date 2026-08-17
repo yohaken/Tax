@@ -12,7 +12,8 @@
     "import:pdfs": "node scripts/import-pdfs.mjs",
     "import:pdfs:live": "MY_TAX_BASE=https://mynote-tax.web.app node scripts/import-pdfs.mjs",
     "agent:status": "node scripts/agent-status.mjs",
-    "agent:status:get": "node scripts/agent-status.mjs get"
+    "agent:status:get": "node scripts/agent-status.mjs get",
+    "test:tax": "node --experimental-strip-types scripts/test-tax-calc.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

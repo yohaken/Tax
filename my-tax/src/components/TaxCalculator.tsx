@@ -5,22 +5,26 @@ import { Text } from "moduix";
 import {
   INCOME_SHORTCUTS,
   bracketCumulativeCaps,
-  calcProgressiveTax,
   formatBaht,
   formatPercent,
 } from "@/lib/tax-brackets";
 import {
   DEDUCTION_FIELDS,
   DEDUCTION_GROUP_LABEL,
-  calcDeductions,
   deductionScaleFor,
   personalAllowance,
   type DeductionField,
   type TaxPeriod,
 } from "@/lib/tax-deductions";
 import {
+  EXPENSE_PRESETS,
+  type ExpenseMode,
+} from "@/lib/tax-expense";
+import { calcPersonalTax } from "@/lib/tax-personal";
+import {
   activeDeductions,
   activeIncomes,
+  activeSlice,
   addIncomeRow,
   loadTaxCalcDraft,
   removeIncomeRow,
@@ -28,6 +32,7 @@ import {
   setDraftPeriod,
   sumIncomeRows,
   updateActiveDeductions,
+  updateExpense,
   updateIncomeRow,
   type IncomeRow,
   type TaxCalcDraft,
@@ -127,17 +132,25 @@ export function TaxCalculator() {
 
   const period: TaxPeriod = draft?.period || "annual";
   const isMidyear = period === "midyear";
+  const slice = draft ? activeSlice(draft) : null;
   const incomes = draft ? activeIncomes(draft) : [];
   const deductions = draft ? activeDeductions(draft) : {};
   const incomeTotal = sumIncomeRows(incomes);
-  const deductionResult = useMemo(
-    () => calcDeductions(incomeTotal, deductions, period),
-    [incomeTotal, deductions, period],
+  const result = useMemo(
+    () =>
+      calcPersonalTax({
+        grossIncome: incomeTotal,
+        expense: {
+          mode: slice?.expenseMode || (isMidyear ? "flat60" : "salary50cap100k"),
+          customPct: slice?.customExpensePct,
+          customAmount: slice?.customExpenseAmount,
+        },
+        deductions,
+        period,
+      }),
+    [incomeTotal, deductions, period, slice, isMidyear],
   );
-  const tax = useMemo(
-    () => calcProgressiveTax(deductionResult.netIncome),
-    [deductionResult.netIncome],
-  );
+  const { expense, deductions: deductionResult, tax } = result;
   const rateCaps = useMemo(() => bracketCumulativeCaps(), []);
   const personalRight = personalAllowance(period);
 
@@ -195,6 +208,11 @@ export function TaxCalculator() {
     );
   }
 
+  function setExpenseMode(mode: ExpenseMode) {
+    if (!draft) return;
+    persist(updateExpense(draft, { expenseMode: mode }));
+  }
+
   function setPeriod(next: TaxPeriod) {
     if (!draft || draft.period === next) return;
     const switched = setDraftPeriod(draft, next);
@@ -202,7 +220,7 @@ export function TaxCalculator() {
     persist(switched);
   }
 
-  if (!draft) {
+  if (!draft || !slice) {
     return (
       <div className="tax-calc">
         <Text tone="muted">กำลังโหลด…</Text>
@@ -240,8 +258,8 @@ export function TaxCalculator() {
         </div>
         <Text size="sm" tone="muted">
           {isMidyear
-            ? "ภ.ง.ด.94 · ลดหย่อนครึ่งสิทธิ · ขั้นบันไดชุดเดิม"
-            : "ภ.ง.ด.90/91 · ขั้นบันไดสะสมทั้งปี"}
+            ? "ภ.ง.ด.94 · หักค่าใช้จ่าย → ลดหย่อนครึ่งสิทธิ → ขั้นบันไดชุดเดิม"
+            : "ภ.ง.ด.90/91 · หักค่าใช้จ่าย → ลดหย่อน → ขั้นบันได"}
         </Text>
         <span
           className={`tax-save-pill${saveState === "saved" ? " is-saved" : ""}${saveState === "saving" ? " is-saving" : ""}`}
@@ -257,12 +275,12 @@ export function TaxCalculator() {
       <section className="tax-calc-panel">
         <div className="tax-section-head">
           <h2 className="tax-section-title">
-            {isMidyear ? "เงินได้ครึ่งปี" : "เงินได้สุทธิ"}
+            {isMidyear ? "เงินได้ครึ่งปี (ก่อนหักค่าใช้จ่าย)" : "เงินได้ทั้งปี (ก่อนหักค่าใช้จ่าย)"}
           </h2>
           <Text size="sm" tone="muted">
             {isMidyear
-              ? "จำลองแยกจากทั้งปี · ใส่ยอด ม.ค.–มิ.ย."
-              : "จำลองแยกจากครึ่งปี · บันทึกทันที"}
+              ? "ใส่ยอด ม.ค.–มิ.ย. ก่อนหักค่าใช้จ่าย/ลดหย่อน"
+              : "ใส่ยอดทั้งปีก่อนหักค่าใช้จ่าย/ลดหย่อน"}
           </Text>
         </div>
 
@@ -394,10 +412,80 @@ export function TaxCalculator() {
       </section>
 
       <section className="tax-calc-panel tax-calc-panel-slim">
+        <div className="tax-section-head">
+          <h2 className="tax-section-title">หักค่าใช้จ่าย</h2>
+          <Text size="sm" tone="muted">
+            ขั้นก่อนค่าลดหย่อน · {expense.label}
+          </Text>
+        </div>
+        <div className="tax-expense-modes" role="group" aria-label="วิธีหักค่าใช้จ่าย">
+          {EXPENSE_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`tax-expense-chip${slice.expenseMode === preset.id ? " is-active" : ""}`}
+              title={preset.hint}
+              onClick={() => setExpenseMode(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        {slice.expenseMode === "customPct" ? (
+          <label className="tax-expense-custom">
+            <span>% เหมา</span>
+            <input
+              className="tax-calc-input"
+              inputMode="numeric"
+              value={slice.customExpensePct || ""}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^\d]/g, "");
+                persist(
+                  updateExpense(draft, {
+                    customExpensePct: digits ? Number(digits) : 0,
+                  }),
+                );
+              }}
+            />
+          </label>
+        ) : null}
+        {slice.expenseMode === "customAmount" ? (
+          <label className="tax-expense-custom">
+            <span>ยอดหัก (บาท)</span>
+            <input
+              className="tax-calc-input"
+              inputMode="numeric"
+              value={
+                slice.customExpenseAmount
+                  ? formatAmountInput(slice.customExpenseAmount)
+                  : ""
+              }
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^\d]/g, "");
+                persist(
+                  updateExpense(draft, {
+                    customExpenseAmount: digits ? Number(digits) : 0,
+                  }),
+                );
+              }}
+            />
+          </label>
+        ) : null}
+        <p className="tax-expense-summary">
+          หักค่าใช้จ่าย {formatBaht(expense.expense)} → เหลือ{" "}
+          {formatBaht(expense.incomeAfterExpense)} บาท
+        </p>
+      </section>
+
+      <section className="tax-calc-panel tax-calc-panel-slim">
         <div className="tax-result-strip" aria-label="สรุปภาษี">
           <div className="tax-result-chip">
             <span>รวมได้</span>
             <strong>{formatBaht(incomeTotal)}</strong>
+          </div>
+          <div className="tax-result-chip">
+            <span>ค่าใช้จ่าย</span>
+            <strong>{formatBaht(expense.expense)}</strong>
           </div>
           <div className="tax-result-chip">
             <span>ลดหย่อน</span>
@@ -408,7 +496,7 @@ export function TaxCalculator() {
             <strong>{formatBaht(deductionResult.netIncome)}</strong>
           </div>
           <div className="tax-result-chip is-accent">
-            <span>ภาษี</span>
+            <span>{isMidyear ? "ภาษีครึ่งปี" : "ภาษีทั้งปี"}</span>
             <strong>{formatBaht(tax.totalTax)}</strong>
           </div>
           <div className="tax-result-chip">
@@ -500,7 +588,7 @@ export function TaxCalculator() {
               </table>
             ) : (
               <Text size="sm" tone="muted">
-                ยังไม่เข้าช่วงที่ต้องเสียภาษี
+                ยังไม่เข้าช่วงที่ต้องเสียภาษี (สุทธิไม่เกิน 150,000)
               </Text>
             )}
           </div>
@@ -536,8 +624,8 @@ export function TaxCalculator() {
 
         <Text size="sm" tone="muted">
           {isMidyear
-            ? "ครึ่งปี: ใส่เงินได้ช่วง ม.ค.–มิ.ย. หักลดหย่อนครึ่งสิทธิ แล้วคิดขั้นบันไดชุดเดิมบนสุทธิครึ่งปี — ไม่ใช่ภาษีทั้งปี÷2"
-            : "ทั้งปี: คิดแบบก้าวหน้าสะสม — เช่น สุทธิ 500,000 เสีย 27,500 (ไม่ใช่ 10% × ทั้งก้อน)"}
+            ? "ครึ่งปี: เงินได้ → หักค่าใช้จ่าย (เช่น เหมา 60%) → ลดหย่อนครึ่งสิทธิ → ขั้นบันไดชุดเดิมบนสุทธิครึ่งปี — ไม่ใช่ภาษีทั้งปี÷2"
+            : "ทั้งปี: เงินได้ → หักค่าใช้จ่าย → ลดหย่อน → ขั้นบันไดสะสม เช่น สุทธิ 500,000 เสีย 27,500 (ไม่ใช่ 10% × ทั้งก้อน)"}
         </Text>
       </section>
     </div>
