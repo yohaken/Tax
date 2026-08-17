@@ -20,7 +20,7 @@ npm start          # http://localhost:4173
 npm run deploy     # Firebase Hosting site mynote-tax
 ```
 
-**ลิงก์:** https://mynote-tax.web.app
+**ลิงก์:** https://mynote-tax.web.app (เมนูด้านล่าง → ยื่นแบบ / คำนวณภาษี)
 
 ## my-tax
 
@@ -35,10 +35,9 @@ npm run dev        # http://localhost:3000
 
 คู่มือเต็ม: [`my-tax/README.md`](my-tax/README.md)
 
-- ยื่นแบบ: https://mynote-mytax.web.app/filings  
-- คำนวณภาษี: https://mynote-mytax.web.app/calc  
-
 Deploy: push ที่แตะ `my-tax/**` → workflow `Deploy my-tax (Cloud Run + Hosting)`
+
+Smoke test production: `npm run test:smoke-hub`
 
 ---
 

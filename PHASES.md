@@ -25,15 +25,21 @@
 - [x] ลิงก์ TaxTag → `mynote-tax.web.app`
 - [x] ยื่นแบบ / คำนวณภาษี → route ภายใน my-tax
 
-## Phase 4 — Deploy & verify ⬜
+## Phase 4 — Deploy & verify ✅
 
-- [ ] Merge PR → `main`
-- [ ] CI: Deploy TaxTag → https://mynote-tax.web.app
-- [ ] CI: Deploy my-tax Cloud Run → https://mynote-mytax.web.app
-- [ ] ทดสอบ bottom nav ทั้ง 3 แท็บ (มือถือ + desktop)
-- [ ] Login Google ทั้งสองโดเมน (`mynote-tax` + `mynote-mytax`)
+- [x] Merge → `main`
+- [x] CI: Deploy TaxTag → https://mynote-tax.web.app
+- [x] CI: Deploy my-tax Cloud Run → https://mynote-mytax.web.app
+- [x] Smoke: `npm run test:smoke-hub` (build version + bottom nav + my-tax routes)
+- [ ] Login Google ทั้งสองโดเมน (manual)
 
-## Phase 5 — ข้อมูล & workflow (ถัดไป) ⬜
+## Phase 5 — ลบลิงก์ซ้ำ ✅
+
+- [x] เอาปุ่ม hero ซ้ำ (คลังยื่นแบบ / คำนวณภาษี) ออกจาก login gate — ใช้ bottom nav อย่างเดียว
+- [x] ลบ `AppNav.tsx` เก่าใน my-tax (แทนด้วย `TaxHubNav`)
+- [x] Build bump → **v69**
+
+## Phase 6 — ข้อมูล & workflow (ถัดไป) ⬜
 
 - [ ] Scrape form-status จาก RD (Mac + Chrome)
 - [ ] Import PDF แบบ/ใบเสร็จเข้าคลัง

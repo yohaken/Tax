@@ -11,7 +11,8 @@
     "my-tax:install": "npm install --prefix my-tax",
     "test:mobile-login": "node scripts/e2e-mobile-login.mjs",
     "test:real-login": "node scripts/e2e-real-login.mjs",
-    "test:redirect-gate": "node scripts/test-mobile-redirect-gate.mjs"
+    "test:redirect-gate": "node scripts/test-mobile-redirect-gate.mjs",
+    "test:smoke-hub": "node scripts/smoke-tax-hub.mjs"
   },
   "engines": {
     "node": ">=18"
