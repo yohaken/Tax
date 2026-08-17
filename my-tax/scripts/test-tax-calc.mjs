@@ -76,6 +76,37 @@ function calcPersonal(gross, expenseMode, period) {
   else fail("midyear-bracket-same-rates", String(t.totalTax));
 }
 
+// ลิงก์ครึ่งปี × 2: รายได้ 400k → ทั้งปี 800k เหมา 60% · ส่วนตัวเต็มปี 60k
+// หลังค่าใช้จ่าย 320k − 60k = 260k → ภาษี (150k*0)+(110k*0.05)=5,500
+{
+  const mid = calcPersonal(400_000, "flat60", "midyear");
+  const annualGross = 400_000 * 2;
+  const annual = calcPersonal(annualGross, "flat60", "annual");
+  if (approx(mid.deductions.netIncome, 130_000)) pass("link-mid-net", "130,000");
+  else fail("link-mid-net", String(mid.deductions.netIncome));
+  if (approx(annual.expense.incomeAfterExpense, 320_000)) {
+    pass("link-annual-after-expense", "320,000");
+  } else fail("link-annual-after-expense", String(annual.expense.incomeAfterExpense));
+  if (approx(annual.deductions.netIncome, 260_000)) pass("link-annual-net", "260,000");
+  else fail("link-annual-net", String(annual.deductions.netIncome));
+  if (approx(annual.tax.totalTax, 5_500)) pass("link-annual-tax", "5,500");
+  else fail("link-annual-tax", String(annual.tax.totalTax));
+  // สำคัญ: ไม่ใช่ภาษีครึ่งปี × 2
+  if (!approx(annual.tax.totalTax, mid.tax.totalTax * 2) || mid.tax.totalTax === 0) {
+    pass("link-not-tax-times-two", `mid ${mid.tax.totalTax} vs annual ${annual.tax.totalTax}`);
+  } else {
+    fail("link-not-tax-times-two", "incorrectly doubled midyear tax");
+  }
+}
+
+// รายได้/เดือน × 6
+{
+  const monthly = 66_666.666;
+  const half = Math.round(monthly * 6);
+  if (approx(half, 400_000, 1)) pass("monthly-times-six", String(half));
+  else fail("monthly-times-six", String(half));
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 process.exit(failed.length ? 1 : 0);

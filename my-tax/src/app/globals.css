@@ -1119,6 +1119,99 @@ body.is-col-resizing {
   font-weight: 600;
 }
 
+.tax-monthly-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.4rem 0.55rem;
+  margin: 0.35rem 0 0.65rem;
+}
+
+.tax-monthly-field {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.tax-monthly-field .tax-calc-input {
+  width: 7.5rem;
+}
+
+.tax-monthly-op,
+.tax-monthly-eq {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding-bottom: 0.45rem;
+}
+
+.tax-monthly-result {
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding-bottom: 0.4rem;
+}
+
+.tax-link-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.15rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--sage) 8%, #fffdf8);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.tax-link-toggle input {
+  margin-top: 0.2rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--ink);
+}
+
+.tax-link-hint {
+  display: inline;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+
+.tax-derived-banner {
+  margin: 0.25rem 0 0.55rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--sage) 12%, white);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.tax-subsection-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.tax-income-row-compact {
+  grid-template-columns: auto minmax(6rem, 1fr) minmax(5rem, 1.2fr) auto;
+}
+
+.tax-income-idx {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  align-self: center;
+}
+
+.tax-expense-block.is-locked .tax-expense-chip {
+  opacity: 0.75;
+  cursor: default;
+}
+
 .tax-expense-modes {
   display: flex;
   flex-wrap: wrap;

@@ -16,31 +16,28 @@ import {
   type DeductionField,
   type TaxPeriod,
 } from "@/lib/tax-deductions";
+import { EXPENSE_PRESETS, type ExpenseMode } from "@/lib/tax-expense";
+import { calcPersonalTax, type PersonalTaxResult } from "@/lib/tax-personal";
 import {
-  EXPENSE_PRESETS,
-  type ExpenseMode,
-} from "@/lib/tax-expense";
-import { calcPersonalTax } from "@/lib/tax-personal";
-import {
-  activeDeductions,
-  activeIncomes,
-  activeSlice,
   addIncomeRow,
+  annualExpenseInput,
+  annualGross,
+  expenseInputFromSlice,
+  getSlice,
   loadTaxCalcDraft,
+  midyearGross,
   removeIncomeRow,
   saveTaxCalcDraft,
-  setDraftPeriod,
+  setLinkAnnualFromMidyear,
+  setMonthlyIncome,
   sumIncomeRows,
-  updateActiveDeductions,
-  updateExpense,
   updateIncomeRow,
+  updatePeriodDeductions,
+  updatePeriodExpense,
   type IncomeRow,
+  type PeriodSlice,
   type TaxCalcDraft,
 } from "@/lib/tax-calc-store";
-
-function targetStorageKey(period: TaxPeriod) {
-  return `my-tax-calc-shortcut-target-v2-${period}`;
-}
 
 function formatAmountInput(n: number) {
   return Math.max(0, Math.round(n)).toLocaleString("en-US");
@@ -50,62 +47,33 @@ function amountText(n: number) {
   return n ? formatAmountInput(n) : "";
 }
 
-function textsFromIncomes(incomes: IncomeRow[]) {
-  const texts: Record<string, string> = {};
-  for (const row of incomes) texts[row.id] = amountText(row.amount);
-  return texts;
-}
-
-/** อัตโนมัติ: ช่องที่โฟกัสล่าสุด → ช่องว่างแรก → ช่องแรก */
-function pickSmartIncomeId(
-  incomes: IncomeRow[],
-  focusedId: string | null,
-): string {
-  if (focusedId && incomes.some((r) => r.id === focusedId)) return focusedId;
-  const empty = incomes.find((r) => !r.amount);
-  if (empty) return empty.id;
-  return incomes[0]?.id || "";
-}
-
 export function TaxCalculator() {
   const [draft, setDraft] = useState<TaxCalcDraft | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [amountTexts, setAmountTexts] = useState<Record<string, string>>({});
-  /** "auto" หรือ id ของช่อง */
-  const [targetMode, setTargetMode] = useState<string>("auto");
-  const [focusedIncomeId, setFocusedIncomeId] = useState<string | null>(null);
-  const [deductOpen, setDeductOpen] = useState(false);
+  const [monthlyText, setMonthlyText] = useState("");
+  const [midTexts, setMidTexts] = useState<Record<string, string>>({});
+  const [annualTexts, setAnnualTexts] = useState<Record<string, string>>({});
+  const [midDeductOpen, setMidDeductOpen] = useState(false);
+  const [annualDeductOpen, setAnnualDeductOpen] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
 
-  function syncPeriodUi(next: TaxCalcDraft, preferTarget?: string) {
-    const incomes = activeIncomes(next);
-    setAmountTexts(textsFromIncomes(incomes));
-    let mode = preferTarget || "auto";
-    try {
-      const saved = window.localStorage.getItem(targetStorageKey(next.period));
-      if (saved === "auto" || incomes.some((r) => r.id === saved)) {
-        mode = saved || "auto";
-      } else if (preferTarget && (preferTarget === "auto" || incomes.some((r) => r.id === preferTarget))) {
-        mode = preferTarget;
-      } else {
-        mode = "auto";
-      }
-    } catch {
-      mode = "auto";
-    }
-    setTargetMode(mode);
-    setFocusedIncomeId(
-      mode !== "auto" && incomes.some((r) => r.id === mode)
-        ? mode
-        : incomes[0]?.id ?? null,
-    );
+  function hydrateTexts(next: TaxCalcDraft) {
+    const mid = getSlice(next, "midyear").incomes;
+    const annual = getSlice(next, "annual").incomes;
+    const mt: Record<string, string> = {};
+    const at: Record<string, string> = {};
+    for (const row of mid) mt[row.id] = amountText(row.amount);
+    for (const row of annual) at[row.id] = amountText(row.amount);
+    setMidTexts(mt);
+    setAnnualTexts(at);
+    setMonthlyText(amountText(next.monthlyIncome));
   }
 
   useEffect(() => {
     const loaded = loadTaxCalcDraft();
     setDraft(loaded);
-    syncPeriodUi(loaded);
+    hydrateTexts(loaded);
   }, []);
 
   function persist(next: TaxCalcDraft) {
@@ -120,107 +88,31 @@ export function TaxCalculator() {
     }, 250);
   }
 
-  function chooseTargetMode(mode: string) {
-    setTargetMode(mode);
-    if (!draft) return;
-    try {
-      window.localStorage.setItem(targetStorageKey(draft.period), mode);
-    } catch {
-      /* ignore */
-    }
-  }
+  const midyear = useMemo(() => {
+    if (!draft) return null;
+    const slice = getSlice(draft, "midyear");
+    return calcPersonalTax({
+      grossIncome: midyearGross(draft),
+      expense: expenseInputFromSlice(slice),
+      deductions: slice.deductions,
+      period: "midyear",
+    });
+  }, [draft]);
 
-  const period: TaxPeriod = draft?.period || "annual";
-  const isMidyear = period === "midyear";
-  const slice = draft ? activeSlice(draft) : null;
-  const incomes = draft ? activeIncomes(draft) : [];
-  const deductions = draft ? activeDeductions(draft) : {};
-  const incomeTotal = sumIncomeRows(incomes);
-  const result = useMemo(
-    () =>
-      calcPersonalTax({
-        grossIncome: incomeTotal,
-        expense: {
-          mode: slice?.expenseMode || (isMidyear ? "flat60" : "salary50cap100k"),
-          customPct: slice?.customExpensePct,
-          customAmount: slice?.customExpenseAmount,
-        },
-        deductions,
-        period,
-      }),
-    [incomeTotal, deductions, period, slice, isMidyear],
-  );
-  const { expense, deductions: deductionResult, tax } = result;
+  const annual = useMemo(() => {
+    if (!draft) return null;
+    const slice = getSlice(draft, "annual");
+    return calcPersonalTax({
+      grossIncome: annualGross(draft),
+      expense: annualExpenseInput(draft),
+      deductions: slice.deductions,
+      period: "annual",
+    });
+  }, [draft]);
+
   const rateCaps = useMemo(() => bracketCumulativeCaps(), []);
-  const personalRight = personalAllowance(period);
 
-  const resolvedTargetId = draft
-    ? targetMode === "auto"
-      ? pickSmartIncomeId(incomes, focusedIncomeId)
-      : incomes.some((r) => r.id === targetMode)
-        ? targetMode
-        : pickSmartIncomeId(incomes, focusedIncomeId)
-    : "";
-
-  const resolvedTargetIndex = Math.max(
-    0,
-    incomes.findIndex((r) => r.id === resolvedTargetId),
-  );
-
-  function updateIncome(id: string, patch: Partial<IncomeRow>) {
-    if (!draft) return;
-    persist(updateIncomeRow(draft, id, patch));
-  }
-
-  function onAmountChange(id: string, raw: string) {
-    const digits = raw.replace(/[^\d]/g, "");
-    const text = digits ? formatAmountInput(Number(digits)) : "";
-    setAmountTexts((prev) => ({ ...prev, [id]: text }));
-    updateIncome(id, { amount: digits ? Number(digits) : 0 });
-  }
-
-  function applyShortcut(amount: number) {
-    if (!draft || !resolvedTargetId) return;
-    const row = incomes.find((r) => r.id === resolvedTargetId);
-    if (!row) return;
-    const nextAmount = row.amount + amount;
-    setFocusedIncomeId(resolvedTargetId);
-    setAmountTexts((prev) => ({
-      ...prev,
-      [resolvedTargetId]: amountText(nextAmount),
-    }));
-    updateIncome(resolvedTargetId, { amount: nextAmount });
-  }
-
-  function clearTargetRow() {
-    if (!draft || !resolvedTargetId) return;
-    setAmountTexts((prev) => ({ ...prev, [resolvedTargetId]: "" }));
-    updateIncome(resolvedTargetId, { amount: 0 });
-  }
-
-  function setDeduction(id: string, value: number) {
-    if (!draft) return;
-    persist(
-      updateActiveDeductions(draft, {
-        ...deductions,
-        [id]: Math.max(0, value),
-      }),
-    );
-  }
-
-  function setExpenseMode(mode: ExpenseMode) {
-    if (!draft) return;
-    persist(updateExpense(draft, { expenseMode: mode }));
-  }
-
-  function setPeriod(next: TaxPeriod) {
-    if (!draft || draft.period === next) return;
-    const switched = setDraftPeriod(draft, next);
-    syncPeriodUi(switched, "auto");
-    persist(switched);
-  }
-
-  if (!draft || !slice) {
+  if (!draft || !midyear || !annual) {
     return (
       <div className="tax-calc">
         <Text tone="muted">กำลังโหลด…</Text>
@@ -228,38 +120,47 @@ export function TaxCalculator() {
     );
   }
 
-  const groups = (["family", "insurance", "saving", "other", "donation"] as const).map(
-    (group) => ({
-      group,
-      label: DEDUCTION_GROUP_LABEL[group],
-      fields: DEDUCTION_FIELDS.filter((f) => f.group === group),
-    }),
-  );
+  const live = draft;
+  const midSlice = getSlice(live, "midyear");
+  const annualSlice = getSlice(live, "annual");
+  const linked = live.linkAnnualFromMidyear;
+  const midGross = midyearGross(live);
+  const yearGross = annualGross(live);
+
+  function onMonthlyChange(raw: string) {
+    const digits = raw.replace(/[^\d]/g, "");
+    const monthly = digits ? Number(digits) : 0;
+    setMonthlyText(digits ? formatAmountInput(monthly) : "");
+    const next = setMonthlyIncome(live, monthly);
+    hydrateTexts(next);
+    persist(next);
+  }
+
+  function onIncomeAmount(
+    period: TaxPeriod,
+    id: string,
+    raw: string,
+    setTexts: (fn: (prev: Record<string, string>) => Record<string, string>) => void,
+  ) {
+    const digits = raw.replace(/[^\d]/g, "");
+    const amount = digits ? Number(digits) : 0;
+    setTexts((prev) => ({
+      ...prev,
+      [id]: digits ? formatAmountInput(amount) : "",
+    }));
+    const next = updateIncomeRow(live, period, id, { amount });
+    if (period === "midyear") {
+      setMonthlyText(amountText(next.monthlyIncome));
+    }
+    persist(next);
+  }
 
   return (
     <div className="tax-calc">
       <header className="tax-calc-head">
         <h1 className="tax-calc-page-title">คำนวณภาษี</h1>
-        <div className="tax-period-switch" role="group" aria-label="โหมดรอบภาษี">
-          <button
-            type="button"
-            className={`tax-period-chip${period === "annual" ? " is-active" : ""}`}
-            onClick={() => setPeriod("annual")}
-          >
-            ทั้งปี
-          </button>
-          <button
-            type="button"
-            className={`tax-period-chip${period === "midyear" ? " is-active" : ""}`}
-            onClick={() => setPeriod("midyear")}
-          >
-            ครึ่งปี
-          </button>
-        </div>
         <Text size="sm" tone="muted">
-          {isMidyear
-            ? "ภ.ง.ด.94 · หักค่าใช้จ่าย → ลดหย่อนครึ่งสิทธิ → ขั้นบันไดชุดเดิม"
-            : "ภ.ง.ด.90/91 · หักค่าใช้จ่าย → ลดหย่อน → ขั้นบันได"}
+          ครึ่งปี (ภ.ง.ด.94) + ภาพรวมทั้งปี — หน้าเดียว
         </Text>
         <span
           className={`tax-save-pill${saveState === "saved" ? " is-saved" : ""}${saveState === "saving" ? " is-saving" : ""}`}
@@ -272,362 +173,521 @@ export function TaxCalculator() {
         </span>
       </header>
 
+      {/* ── ครึ่งปี ── */}
       <section className="tax-calc-panel">
         <div className="tax-section-head">
-          <h2 className="tax-section-title">
-            {isMidyear ? "เงินได้ครึ่งปี (ก่อนหักค่าใช้จ่าย)" : "เงินได้ทั้งปี (ก่อนหักค่าใช้จ่าย)"}
-          </h2>
+          <h2 className="tax-section-title">ครึ่งปี · ภ.ง.ด.94</h2>
           <Text size="sm" tone="muted">
-            {isMidyear
-              ? "ใส่ยอด ม.ค.–มิ.ย. ก่อนหักค่าใช้จ่าย/ลดหย่อน"
-              : "ใส่ยอดทั้งปีก่อนหักค่าใช้จ่าย/ลดหย่อน"}
+            ม.ค.–มิ.ย. · หักค่าใช้จ่าย → ลดหย่อนครึ่งสิทธิ → ขั้นบันไดชุดเดิม
           </Text>
         </div>
 
-        <div className="tax-income-rows">
-          {incomes.map((row, index) => {
-            const isTarget = row.id === resolvedTargetId;
-            return (
-              <div
-                className={`tax-income-row${isTarget ? " is-target" : ""}`}
-                key={row.id}
-              >
-                <button
-                  type="button"
-                  className={`tax-income-label-btn${isTarget ? " is-active" : ""}`}
-                  onClick={() => {
-                    setFocusedIncomeId(row.id);
-                    chooseTargetMode(row.id);
-                  }}
-                  title="เลือกช่องนี้สำหรับตัวช่วยใส่เงิน"
-                >
-                  {isMidyear ? "ครึ่งปี" : "ทั้งปี"} {index + 1}
-                </button>
-                <input
-                  className="tax-calc-input tax-income-amount"
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={amountTexts[row.id] ?? amountText(row.amount)}
-                  onFocus={() => setFocusedIncomeId(row.id)}
-                  onChange={(e) => onAmountChange(row.id, e.target.value)}
-                />
-                <input
-                  className="tax-income-note"
-                  placeholder="โน้ต…"
-                  value={row.note}
-                  onFocus={() => setFocusedIncomeId(row.id)}
-                  onChange={(e) => updateIncome(row.id, { note: e.target.value })}
-                />
-                <button
-                  type="button"
-                  className="tax-row-remove"
-                  aria-label={`ลบช่อง ${index + 1}`}
-                  onClick={() => {
-                    const next = removeIncomeRow(draft, row.id);
-                    const nextIncomes = activeIncomes(next);
-                    if (targetMode === row.id) chooseTargetMode("auto");
-                    if (focusedIncomeId === row.id) {
-                      setFocusedIncomeId(nextIncomes[0]?.id ?? null);
-                    }
-                    persist(next);
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
+        <div className="tax-monthly-row" aria-label="รายได้ต่อเดือนคูณหก">
+          <label className="tax-monthly-field">
+            <span>บาท/เดือน</span>
+            <input
+              className="tax-calc-input"
+              inputMode="numeric"
+              placeholder="0"
+              value={monthlyText}
+              onChange={(e) => onMonthlyChange(e.target.value)}
+            />
+          </label>
+          <span className="tax-monthly-op" aria-hidden="true">
+            × 6
+          </span>
+          <span className="tax-monthly-eq" aria-hidden="true">
+            →
+          </span>
+          <span className="tax-monthly-result">
+            ครึ่งปี {formatBaht(midGross)}
+          </span>
         </div>
 
-        <div className="tax-shortcut-block">
-          <div className="tax-target-row" role="group" aria-label="เลือกช่องรับตัวช่วย">
-            <span className="tax-target-label">ใส่เข้า</span>
-            <button
-              type="button"
-              className={`tax-target-chip${targetMode === "auto" ? " is-active" : ""}`}
-              onClick={() => chooseTargetMode("auto")}
-              title="โฟกัสล่าสุด → ช่องว่างแรก → ช่อง 1"
-            >
-              อัตโนมัติ
-            </button>
-            {incomes.map((row, index) => (
-              <button
-                key={row.id}
-                type="button"
-                className={`tax-target-chip${targetMode === row.id ? " is-active" : ""}${resolvedTargetId === row.id && targetMode === "auto" ? " is-resolved" : ""}`}
-                onClick={() => {
-                  setFocusedIncomeId(row.id);
-                  chooseTargetMode(row.id);
-                }}
-              >
-                ช่อง {index + 1}
-              </button>
-            ))}
-            <span className="tax-target-hint">
-              ตอนนี้ → ช่อง {resolvedTargetIndex + 1}
-            </span>
-          </div>
+        <IncomeRows
+          period="midyear"
+          slice={midSlice}
+          texts={midTexts}
+          draft={live}
+          locked={false}
+          onAmount={(id, raw) => onIncomeAmount("midyear", id, raw, setMidTexts)}
+          onNote={(id, note) => persist(updateIncomeRow(live, "midyear", id, { note }))}
+          onAdd={() => {
+            const next = addIncomeRow(live, "midyear");
+            hydrateTexts(next);
+            persist(next);
+          }}
+          onRemove={(id) => {
+            const next = removeIncomeRow(live, "midyear", id);
+            hydrateTexts(next);
+            persist(next);
+          }}
+          onShortcut={(id, add) => {
+            const row = midSlice.incomes.find((r) => r.id === id);
+            if (!row) return;
+            const amount = row.amount + add;
+            setMidTexts((prev) => ({ ...prev, [id]: amountText(amount) }));
+            const next = updateIncomeRow(live, "midyear", id, { amount });
+            setMonthlyText(amountText(next.monthlyIncome));
+            persist(next);
+          }}
+        />
 
-          <div className="tax-shortcut-row" role="group" aria-label="ตัวช่วยใส่เงิน">
+        <ExpenseBlock
+          slice={midSlice}
+          expenseLabel={midyear.expense.label}
+          expenseAmount={midyear.expense.expense}
+          afterExpense={midyear.expense.incomeAfterExpense}
+          onMode={(mode) =>
+            persist(updatePeriodExpense(live, "midyear", { expenseMode: mode }))
+          }
+          onPct={(n) =>
+            persist(updatePeriodExpense(live, "midyear", { customExpensePct: n }))
+          }
+          onAmt={(n) =>
+            persist(
+              updatePeriodExpense(live, "midyear", { customExpenseAmount: n }),
+            )
+          }
+        />
+
+        <ResultStrip
+          period="midyear"
+          gross={midGross}
+          result={midyear}
+        />
+
+        <DeductionPanel
+          period="midyear"
+          open={midDeductOpen}
+          onToggle={() => setMidDeductOpen((v) => !v)}
+          slice={midSlice}
+          total={midyear.deductions.total}
+          onChange={(id, value) =>
+            persist(
+              updatePeriodDeductions(live, "midyear", {
+                ...midSlice.deductions,
+                [id]: value,
+              }),
+            )
+          }
+        />
+      </section>
+
+      {/* ── ลิงก์ ×2 ── */}
+      <label className="tax-link-toggle">
+        <input
+          type="checkbox"
+          checked={linked}
+          onChange={(e) =>
+            persist(setLinkAnnualFromMidyear(live, e.target.checked))
+          }
+        />
+        <span>
+          <strong>ใช้ครึ่งปี × 2</strong> เป็นประมาณการทั้งปี
+          <span className="tax-link-hint">
+            {linked
+              ? ` · รายได้ทั้งปี = ${formatBaht(yearGross)} (ล็อกจากครึ่งปี)`
+              : " · ปิดแล้วแก้ทั้งปีเองได้"}
+          </span>
+        </span>
+      </label>
+
+      {/* ── ทั้งปี ── */}
+      <section className="tax-calc-panel">
+        <div className="tax-section-head">
+          <h2 className="tax-section-title">ทั้งปี · ภ.ง.ด.90/91</h2>
+          <Text size="sm" tone="muted">
+            {linked
+              ? "ประมาณการจากครึ่งปี × 2 · ลดหย่อนใช้สิทธิเต็มปี · คิดขั้นบันไดใหม่ (ไม่ใช่ภาษีครึ่งปี×2)"
+              : "แก้รายได้ทั้งปีเองอิสระ"}
+          </Text>
+        </div>
+
+        {linked ? (
+          <p className="tax-derived-banner">
+            รายได้ทั้งปี {formatBaht(yearGross)} = ครึ่งปี {formatBaht(midGross)} × 2
+          </p>
+        ) : (
+          <IncomeRows
+            period="annual"
+            slice={annualSlice}
+            texts={annualTexts}
+            draft={live}
+            locked={false}
+            onAmount={(id, raw) =>
+              onIncomeAmount("annual", id, raw, setAnnualTexts)
+            }
+            onNote={(id, note) =>
+              persist(updateIncomeRow(live, "annual", id, { note }))
+            }
+            onAdd={() => {
+              const next = addIncomeRow(live, "annual");
+              hydrateTexts(next);
+              persist(next);
+            }}
+            onRemove={(id) => {
+              const next = removeIncomeRow(live, "annual", id);
+              hydrateTexts(next);
+              persist(next);
+            }}
+            onShortcut={(id, add) => {
+              const row = annualSlice.incomes.find((r) => r.id === id);
+              if (!row) return;
+              const amount = row.amount + add;
+              setAnnualTexts((prev) => ({ ...prev, [id]: amountText(amount) }));
+              persist(updateIncomeRow(live, "annual", id, { amount }));
+            }}
+          />
+        )}
+
+        <ExpenseBlock
+          slice={linked ? midSlice : annualSlice}
+          expenseLabel={annual.expense.label}
+          expenseAmount={annual.expense.expense}
+          afterExpense={annual.expense.incomeAfterExpense}
+          locked={linked}
+          onMode={(mode) =>
+            persist(
+              updatePeriodExpense(live, linked ? "midyear" : "annual", {
+                expenseMode: mode,
+              }),
+            )
+          }
+          onPct={(n) =>
+            persist(
+              updatePeriodExpense(live, linked ? "midyear" : "annual", {
+                customExpensePct: n,
+              }),
+            )
+          }
+          onAmt={(n) =>
+            persist(
+              updatePeriodExpense(live, linked ? "midyear" : "annual", {
+                customExpenseAmount: n,
+              }),
+            )
+          }
+        />
+
+        <ResultStrip period="annual" gross={yearGross} result={annual} />
+
+        <DeductionPanel
+          period="annual"
+          open={annualDeductOpen}
+          onToggle={() => setAnnualDeductOpen((v) => !v)}
+          slice={annualSlice}
+          total={annual.deductions.total}
+          onChange={(id, value) =>
+            persist(
+              updatePeriodDeductions(live, "annual", {
+                ...annualSlice.deductions,
+                [id]: value,
+              }),
+            )
+          }
+        />
+      </section>
+
+      <section className="tax-calc-panel">
+        <div className="tax-table-caption">อัตราขั้นบันได (ใช้ชุดเดียวกันทั้งครึ่งปีและทั้งปี)</div>
+        <table className="tax-rate-table">
+          <thead>
+            <tr>
+              <th>เงินได้สุทธิ</th>
+              <th>อัตรา</th>
+              <th>ภาษีสะสมสูงสุด</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rateCaps.map((b) => (
+              <tr key={b.label}>
+                <td>{b.label}</td>
+                <td>{formatPercent(b.rate)}</td>
+                <td>
+                  {b.cumulativeTaxMax == null
+                    ? "—"
+                    : formatBaht(b.cumulativeTaxMax)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  );
+}
+
+function IncomeRows({
+  period,
+  slice,
+  texts,
+  locked,
+  onAmount,
+  onNote,
+  onAdd,
+  onRemove,
+  onShortcut,
+}: {
+  period: TaxPeriod;
+  slice: PeriodSlice;
+  texts: Record<string, string>;
+  draft: TaxCalcDraft;
+  locked: boolean;
+  onAmount: (id: string, raw: string) => void;
+  onNote: (id: string, note: string) => void;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+  onShortcut: (id: string, add: number) => void;
+}) {
+  const primaryId = slice.incomes[0]?.id || "";
+  return (
+    <div className="tax-income-block">
+      <div className="tax-income-rows">
+        {slice.incomes.map((row, index) => (
+          <div className="tax-income-row tax-income-row-compact" key={row.id}>
+            <span className="tax-income-idx">
+              {period === "midyear" ? "ครึ่งปี" : "ทั้งปี"}
+              {slice.incomes.length > 1 ? ` ${index + 1}` : ""}
+            </span>
+            <input
+              className="tax-calc-input tax-income-amount"
+              inputMode="numeric"
+              placeholder="0"
+              disabled={locked}
+              value={texts[row.id] ?? amountText(row.amount)}
+              onChange={(e) => onAmount(row.id, e.target.value)}
+            />
+            <input
+              className="tax-income-note"
+              placeholder="โน้ต…"
+              disabled={locked}
+              value={row.note}
+              onChange={(e) => onNote(row.id, e.target.value)}
+            />
+            {!locked && slice.incomes.length > 1 ? (
+              <button
+                type="button"
+                className="tax-row-remove"
+                aria-label="ลบช่อง"
+                onClick={() => onRemove(row.id)}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {!locked ? (
+        <div className="tax-row-actions">
+          <div className="tax-shortcut-row" role="group" aria-label="ตัวช่วย">
             {INCOME_SHORTCUTS.map((amount) => (
               <button
                 key={amount}
                 type="button"
                 className="tax-shortcut-btn"
-                onClick={() => applyShortcut(amount)}
+                onClick={() => onShortcut(primaryId, amount)}
               >
                 +{formatBaht(amount)}
               </button>
             ))}
-            <button
-              type="button"
-              className="tax-shortcut-btn is-mute"
-              onClick={clearTargetRow}
-            >
-              ล้างช่องนี้
-            </button>
           </div>
-        </div>
-
-        <div className="tax-row-actions">
-          <button
-            type="button"
-            className="tax-shortcut-btn"
-            onClick={() => {
-              const next = addIncomeRow(draft);
-              const added = activeIncomes(next).at(-1);
-              if (added) {
-                setFocusedIncomeId(added.id);
-                setAmountTexts((prev) => ({ ...prev, [added.id]: "" }));
-              }
-              persist(next);
-            }}
-          >
-            + เพิ่มช่องเงินได้
+          <button type="button" className="tax-shortcut-btn" onClick={onAdd}>
+            + เพิ่มช่อง
           </button>
           <span className="tax-inline-sum">
-            รวม{isMidyear ? "ครึ่งปี" : "ทั้งปี"} {formatBaht(incomeTotal)} บาท
+            รวม {formatBaht(sumIncomeRows(slice.incomes))}
           </span>
         </div>
-      </section>
+      ) : null}
+    </div>
+  );
+}
 
-      <section className="tax-calc-panel tax-calc-panel-slim">
-        <div className="tax-section-head">
-          <h2 className="tax-section-title">หักค่าใช้จ่าย</h2>
-          <Text size="sm" tone="muted">
-            ขั้นก่อนค่าลดหย่อน · {expense.label}
-          </Text>
-        </div>
-        <div className="tax-expense-modes" role="group" aria-label="วิธีหักค่าใช้จ่าย">
-          {EXPENSE_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className={`tax-expense-chip${slice.expenseMode === preset.id ? " is-active" : ""}`}
-              title={preset.hint}
-              onClick={() => setExpenseMode(preset.id)}
-            >
-              {preset.label}
-            </button>
+function ExpenseBlock({
+  slice,
+  expenseLabel,
+  expenseAmount,
+  afterExpense,
+  locked = false,
+  onMode,
+  onPct,
+  onAmt,
+}: {
+  slice: PeriodSlice;
+  expenseLabel: string;
+  expenseAmount: number;
+  afterExpense: number;
+  locked?: boolean;
+  onMode: (mode: ExpenseMode) => void;
+  onPct: (n: number) => void;
+  onAmt: (n: number) => void;
+}) {
+  return (
+    <div className={`tax-expense-block${locked ? " is-locked" : ""}`}>
+      <div className="tax-section-head">
+        <h3 className="tax-subsection-title">หักค่าใช้จ่าย</h3>
+        <Text size="sm" tone="muted">
+          {expenseLabel}
+          {locked ? " · ตามครึ่งปี" : ""}
+        </Text>
+      </div>
+      <div className="tax-expense-modes" role="group">
+        {EXPENSE_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            disabled={locked}
+            className={`tax-expense-chip${slice.expenseMode === preset.id ? " is-active" : ""}`}
+            title={preset.hint}
+            onClick={() => onMode(preset.id)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+      {slice.expenseMode === "customPct" && !locked ? (
+        <label className="tax-expense-custom">
+          <span>% เหมา</span>
+          <input
+            className="tax-calc-input"
+            inputMode="numeric"
+            value={slice.customExpensePct || ""}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/[^\d]/g, "");
+              onPct(digits ? Number(digits) : 0);
+            }}
+          />
+        </label>
+      ) : null}
+      {slice.expenseMode === "customAmount" && !locked ? (
+        <label className="tax-expense-custom">
+          <span>ยอดหัก</span>
+          <input
+            className="tax-calc-input"
+            inputMode="numeric"
+            value={
+              slice.customExpenseAmount
+                ? formatAmountInput(slice.customExpenseAmount)
+                : ""
+            }
+            onChange={(e) => {
+              const digits = e.target.value.replace(/[^\d]/g, "");
+              onAmt(digits ? Number(digits) : 0);
+            }}
+          />
+        </label>
+      ) : null}
+      <p className="tax-expense-summary">
+        หัก {formatBaht(expenseAmount)} → เหลือ {formatBaht(afterExpense)}
+      </p>
+    </div>
+  );
+}
+
+function ResultStrip({
+  period,
+  gross,
+  result,
+}: {
+  period: TaxPeriod;
+  gross: number;
+  result: PersonalTaxResult;
+}) {
+  return (
+    <div className="tax-result-strip" aria-label="สรุปภาษี">
+      <div className="tax-result-chip">
+        <span>รวมได้</span>
+        <strong>{formatBaht(gross)}</strong>
+      </div>
+      <div className="tax-result-chip">
+        <span>ค่าใช้จ่าย</span>
+        <strong>{formatBaht(result.expense.expense)}</strong>
+      </div>
+      <div className="tax-result-chip">
+        <span>ลดหย่อน</span>
+        <strong>{formatBaht(result.deductions.total)}</strong>
+      </div>
+      <div className="tax-result-chip">
+        <span>สุทธิ</span>
+        <strong>{formatBaht(result.deductions.netIncome)}</strong>
+      </div>
+      <div className="tax-result-chip is-accent">
+        <span>{period === "midyear" ? "ภาษีครึ่งปี" : "ภาษีทั้งปี"}</span>
+        <strong>{formatBaht(result.tax.totalTax)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function DeductionPanel({
+  period,
+  open,
+  onToggle,
+  slice,
+  total,
+  onChange,
+}: {
+  period: TaxPeriod;
+  open: boolean;
+  onToggle: () => void;
+  slice: PeriodSlice;
+  total: number;
+  onChange: (id: string, value: number) => void;
+}) {
+  const personalRight = personalAllowance(period);
+  const groups = (["family", "insurance", "saving", "other", "donation"] as const).map(
+    (group) => ({
+      group,
+      label: DEDUCTION_GROUP_LABEL[group],
+      fields: DEDUCTION_FIELDS.filter((f) => f.group === group),
+    }),
+  );
+
+  return (
+    <div className="tax-deduct-shell">
+      <button
+        type="button"
+        className="tax-deduct-toggle"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span className="tax-deduct-caret">{open ? "▾" : "▸"}</span>
+        <span>หักค่าลดหย่อน</span>
+        <span className="tax-deduct-toggle-meta">
+          รวม {formatBaht(total)} · ส่วนตัว {formatBaht(personalRight)}
+          {period === "midyear" ? " · สิทธิ÷2" : " · สิทธิเต็มปี"}
+        </span>
+      </button>
+      {open ? (
+        <div className="tax-deduct-body">
+          {period === "midyear" ? (
+            <p className="tax-deduct-note">
+              ครึ่งปีใช้สิทธิลดหย่อนกึ่งหนึ่ง (ม.56 ทวิ) — ไม่ใช่ภาษีทั้งปี÷2
+            </p>
+          ) : null}
+          {groups.map(({ group, label, fields }) => (
+            <div className="tax-deduct-group" key={group}>
+              <span className="tax-deduct-group-label">{label}</span>
+              <div className="tax-deduct-fields">
+                {fields.map((field) => (
+                  <DeductionInput
+                    key={field.id}
+                    field={field}
+                    period={period}
+                    value={
+                      field.fixed != null
+                        ? personalRight
+                        : slice.deductions[field.id] || 0
+                    }
+                    onChange={(v) => onChange(field.id, v)}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
-        {slice.expenseMode === "customPct" ? (
-          <label className="tax-expense-custom">
-            <span>% เหมา</span>
-            <input
-              className="tax-calc-input"
-              inputMode="numeric"
-              value={slice.customExpensePct || ""}
-              onChange={(e) => {
-                const digits = e.target.value.replace(/[^\d]/g, "");
-                persist(
-                  updateExpense(draft, {
-                    customExpensePct: digits ? Number(digits) : 0,
-                  }),
-                );
-              }}
-            />
-          </label>
-        ) : null}
-        {slice.expenseMode === "customAmount" ? (
-          <label className="tax-expense-custom">
-            <span>ยอดหัก (บาท)</span>
-            <input
-              className="tax-calc-input"
-              inputMode="numeric"
-              value={
-                slice.customExpenseAmount
-                  ? formatAmountInput(slice.customExpenseAmount)
-                  : ""
-              }
-              onChange={(e) => {
-                const digits = e.target.value.replace(/[^\d]/g, "");
-                persist(
-                  updateExpense(draft, {
-                    customExpenseAmount: digits ? Number(digits) : 0,
-                  }),
-                );
-              }}
-            />
-          </label>
-        ) : null}
-        <p className="tax-expense-summary">
-          หักค่าใช้จ่าย {formatBaht(expense.expense)} → เหลือ{" "}
-          {formatBaht(expense.incomeAfterExpense)} บาท
-        </p>
-      </section>
-
-      <section className="tax-calc-panel tax-calc-panel-slim">
-        <div className="tax-result-strip" aria-label="สรุปภาษี">
-          <div className="tax-result-chip">
-            <span>รวมได้</span>
-            <strong>{formatBaht(incomeTotal)}</strong>
-          </div>
-          <div className="tax-result-chip">
-            <span>ค่าใช้จ่าย</span>
-            <strong>{formatBaht(expense.expense)}</strong>
-          </div>
-          <div className="tax-result-chip">
-            <span>ลดหย่อน</span>
-            <strong>{formatBaht(deductionResult.total)}</strong>
-          </div>
-          <div className="tax-result-chip">
-            <span>สุทธิ</span>
-            <strong>{formatBaht(deductionResult.netIncome)}</strong>
-          </div>
-          <div className="tax-result-chip is-accent">
-            <span>{isMidyear ? "ภาษีครึ่งปี" : "ภาษีทั้งปี"}</span>
-            <strong>{formatBaht(tax.totalTax)}</strong>
-          </div>
-          <div className="tax-result-chip">
-            <span>เฉลี่ย</span>
-            <strong>{formatPercent(tax.effectiveRate)}</strong>
-          </div>
-        </div>
-
-        <div className="tax-deduct-shell">
-          <button
-            type="button"
-            className="tax-deduct-toggle"
-            aria-expanded={deductOpen}
-            onClick={() => setDeductOpen((v) => !v)}
-          >
-            <span className="tax-deduct-caret">{deductOpen ? "▾" : "▸"}</span>
-            <span>หักค่าลดหย่อน</span>
-            <span className="tax-deduct-toggle-meta">
-              รวม {formatBaht(deductionResult.total)} · ส่วนตัว{" "}
-              {formatBaht(personalRight)}
-              {isMidyear ? " · สิทธิ÷2" : ""}
-              {deductOpen ? "" : " · แตะเพื่อแก้"}
-            </span>
-          </button>
-
-          {deductOpen ? (
-            <div className="tax-deduct-body">
-              {isMidyear ? (
-                <p className="tax-deduct-note">
-                  ครึ่งปีใช้สิทธิลดหย่อนกึ่งหนึ่ง (ม.56 ทวิ) แต่คิดภาษีด้วยอัตราขั้นบันไดชุดเดิม
-                  — ไม่ใช่ภาษีทั้งปี÷2
-                </p>
-              ) : null}
-              {groups.map(({ group, label, fields }) => (
-                <div className="tax-deduct-group" key={group}>
-                  <span className="tax-deduct-group-label">{label}</span>
-                  <div className="tax-deduct-fields">
-                    {fields.map((field) => (
-                      <DeductionInput
-                        key={field.id}
-                        field={field}
-                        period={period}
-                        value={
-                          field.fixed != null
-                            ? personalRight
-                            : deductions[field.id] || 0
-                        }
-                        onChange={(v) => setDeduction(field.id, v)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="tax-calc-panel">
-        <div className="tax-tables-grid">
-          <div className="tax-slice-table-wrap">
-            <div className="tax-table-caption">
-              แยกตามช่วง (คิดเฉพาะส่วนในขั้น × อัตราขั้นนั้น แล้วบวกสะสม)
-            </div>
-            {tax.slices.length ? (
-              <table className="tax-slice-table">
-                <thead>
-                  <tr>
-                    <th>ช่วง</th>
-                    <th>อัตรา</th>
-                    <th>ฐานในขั้น</th>
-                    <th>ภาษีขั้นนี้</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tax.slices.map((s) => (
-                    <tr key={`${s.label}-${s.rate}`}>
-                      <td>{s.label}</td>
-                      <td>{formatPercent(s.rate)}</td>
-                      <td>{formatBaht(s.base)}</td>
-                      <td>{formatBaht(s.tax)}</td>
-                    </tr>
-                  ))}
-                  <tr className="tax-total-row">
-                    <td colSpan={3}>รวมภาษี</td>
-                    <td>{formatBaht(tax.totalTax)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            ) : (
-              <Text size="sm" tone="muted">
-                ยังไม่เข้าช่วงที่ต้องเสียภาษี (สุทธิไม่เกิน 150,000)
-              </Text>
-            )}
-          </div>
-
-          <div className="tax-rate-table-wrap">
-            <div className="tax-table-caption">
-              อัตราอ้างอิง + ภาษีสะสมสูงสุดของขั้น
-            </div>
-            <table className="tax-rate-table">
-              <thead>
-                <tr>
-                  <th>เงินได้สุทธิ</th>
-                  <th>อัตรา</th>
-                  <th>ภาษีสะสมสูงสุด</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rateCaps.map((b) => (
-                  <tr key={b.label}>
-                    <td>{b.label}</td>
-                    <td>{formatPercent(b.rate)}</td>
-                    <td>
-                      {b.cumulativeTaxMax == null
-                        ? "—"
-                        : formatBaht(b.cumulativeTaxMax)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <Text size="sm" tone="muted">
-          {isMidyear
-            ? "ครึ่งปี: เงินได้ → หักค่าใช้จ่าย (เช่น เหมา 60%) → ลดหย่อนครึ่งสิทธิ → ขั้นบันไดชุดเดิมบนสุทธิครึ่งปี — ไม่ใช่ภาษีทั้งปี÷2"
-            : "ทั้งปี: เงินได้ → หักค่าใช้จ่าย → ลดหย่อน → ขั้นบันไดสะสม เช่น สุทธิ 500,000 เสีย 27,500 (ไม่ใช่ 10% × ทั้งก้อน)"}
-        </Text>
-      </section>
+      ) : null}
     </div>
   );
 }
@@ -648,14 +708,15 @@ function DeductionInput({
   const scale = deductionScaleFor(period);
   const unit = field.unitAmount != null ? field.unitAmount * scale : null;
   const max = field.max == null ? null : field.max * scale;
-  const titleParts = [
+  const title = [
     field.label,
     period === "midyear" ? "ครึ่งปี·สิทธิ÷2" : null,
     unit != null ? `คนละ ${formatBaht(unit)}` : null,
     max != null ? `เพดาน ${formatBaht(max)}` : null,
     field.hint,
-  ].filter(Boolean);
-  const title = titleParts.join(" · ");
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   if (isFixed) {
     return (
