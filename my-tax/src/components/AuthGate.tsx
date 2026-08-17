@@ -12,7 +12,7 @@ import {
   watchAuth,
 } from "@/lib/firebase";
 import { AgentDrawer } from "@/components/AgentDrawer";
-import { AppNav } from "@/components/AppNav";
+import { TaxHubNav } from "@/components/TaxHubNav";
 
 const LOCAL_DEV_KEY = "my-tax-local-dev";
 
@@ -139,10 +139,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <div className="app-header-left">
             <Link href="/">
               <Heading as="h1" size="md" weight="semibold">
-                my-tax
+                Tax
               </Heading>
             </Link>
-            <AppNav />
           </div>
           <div className="app-header-right">
             <Text size="sm" tone="muted" className="app-user-email">
@@ -161,7 +160,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
         </div>
       </header>
       <Separator />
-      <main className="app-main">{children}</main>
+      <main className="app-main app-main-with-hub">{children}</main>
+      <TaxHubNav />
     </div>
   );
 }

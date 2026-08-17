@@ -4,8 +4,10 @@
 
 | แอป | โฟลเดอร์ | ลิงก์ | ทำอะไร |
 |---|---|---|---|
-| **TaxTag** | `public/` | https://mynote-tax.web.app | จัดหมวดรายการโอน Peerland / TellTea จาก statement |
+| **TaxTag** | `public/` | https://mynote-tax.web.app | จัดหมวด statement — **ศูนย์กลาง + bottom nav** |
 | **my-tax** | `my-tax/` | https://mynote-mytax.web.app | คลังยื่นแบบ ภ.ง.ด. + คำนวณภาษี + สรุปพิทเทิ้ล |
+
+เช็คลิส rollout: [`PHASES.md`](PHASES.md)
 
 ทั้งคู่โฮสต์บน Firebase **`mynote-f1bbc`**
 

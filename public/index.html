@@ -5,28 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
-  <meta name="description" content="TaxTag — จัดหมวดรายการ statement เป็นกลุ่ม พร้อมสรุปยอด" />
+  <meta name="description" content="Tax — TaxTag · ยื่นแบบ · คำนวณภาษี (MyNote)" />
   <meta name="theme-color" content="#f7f6f2" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>TaxTag</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=67" />
+  <link rel="stylesheet" href="css/app.css?v=68" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='14' fill='%23f7f6f2' font-family='sans-serif'%3ET%3C/text%3E%3C/svg%3E" />
 </head>
-<body>
+<body class="tax-hub">
   <header class="topbar">
     <div class="brand">
-      <span class="brand-name">TaxTag</span>
-      <span class="brand-sub" id="sync-status">พร้อมใช้งาน</span>
+      <span class="brand-name">Tax</span>
+      <span class="brand-sub" id="sync-status">TaxTag · พร้อมใช้งาน</span>
       <span class="build-stamp" id="build-stamp" title="เวอร์ชันบิลด์">v—</span>
     </div>
-    <nav class="app-switch" aria-label="สลับแอปภาษี">
-      <a class="app-switch-link is-active" href="/" aria-current="page">Statement</a>
-      <a class="app-switch-link" href="https://mynote-mytax.web.app/filings">ยื่นแบบ</a>
-      <a class="app-switch-link" href="https://mynote-mytax.web.app/calc">คำนวณภาษี</a>
-    </nav>
     <div class="top-actions">
       <button type="button" class="btn solid" id="btn-auth">เข้าสู่ระบบ Google</button>
       <div class="auth-only is-hidden" id="auth-tools">
@@ -302,8 +297,23 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <nav class="tax-hub-nav" aria-label="เมนูภาษี">
+    <a class="tax-hub-nav-link is-active" href="/" aria-current="page">
+      <span class="tax-hub-nav-label">TaxTag</span>
+      <span class="tax-hub-nav-hint">Statement</span>
+    </a>
+    <a class="tax-hub-nav-link" href="https://mynote-mytax.web.app/filings">
+      <span class="tax-hub-nav-label">ยื่นแบบ</span>
+      <span class="tax-hub-nav-hint">ภ.ง.ด.</span>
+    </a>
+    <a class="tax-hub-nav-link" href="https://mynote-mytax.web.app/calc">
+      <span class="tax-hub-nav-label">คำนวณภาษี</span>
+      <span class="tax-hub-nav-hint">ประมาณการ</span>
+    </a>
+  </nav>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
-  <script type="module" src="js/app.js?v=67"></script>
+  <script type="module" src="js/app.js?v=68"></script>
 </body>
 </html>
