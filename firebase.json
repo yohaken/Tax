@@ -27,6 +27,76 @@
       ],
       "rewrites": [
         {
+          "source": "/api/**",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/_next/**",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/filings/**",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/filings",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/calc/**",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/calc",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/years/**",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/import/**",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/import",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/favicon.ico",
+          "run": {
+            "serviceId": "my-tax",
+            "region": "asia-southeast1"
+          }
+        },
+        {
           "source": "**",
           "destination": "/index.html"
         }
@@ -40,13 +110,16 @@
         "**/.*",
         "**/node_modules/**"
       ],
-      "rewrites": [
+      "redirects": [
         {
-          "source": "**",
-          "run": {
-            "serviceId": "my-tax",
-            "region": "asia-southeast1"
-          }
+          "source": "/",
+          "destination": "https://mynote-tax.web.app/",
+          "type": 301
+        },
+        {
+          "source": "/:path*",
+          "destination": "https://mynote-tax.web.app/:path",
+          "type": 301
         }
       ]
     }

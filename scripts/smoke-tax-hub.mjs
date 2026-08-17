@@ -1,11 +1,11 @@
 /**
- * Production smoke test — Tax hub (mynote-tax + mynote-mytax).
+ * Production smoke test — single-domain Tax hub (mynote-tax.web.app).
  * Usage: node scripts/smoke-tax-hub.mjs
- *        EXPECT_VERSION=69 node scripts/smoke-tax-hub.mjs
+ *        EXPECT_VERSION=70 node scripts/smoke-tax-hub.mjs
  */
-const TAXTAG = process.env.TAXTAG_URL || "https://mynote-tax.web.app/";
-const MYTAX = process.env.MYTAX_URL || "https://mynote-mytax.web.app";
-const EXPECT_VERSION = Number(process.env.EXPECT_VERSION || 69);
+const HUB = process.env.TAXTAG_URL || "https://mynote-tax.web.app";
+const LEGACY = process.env.LEGACY_MYTAX_URL || "https://mynote-mytax.web.app";
+const EXPECT_VERSION = Number(process.env.EXPECT_VERSION || 70);
 
 const results = [];
 const pass = (name, detail = "") => {
@@ -17,14 +17,16 @@ const fail = (name, detail = "") => {
   console.error(`FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
 };
 
-async function fetchText(url) {
-  const res = await fetch(url, { redirect: "follow" });
+async function fetchRaw(url, { redirect = "follow" } = {}) {
+  const res = await fetch(url, { redirect });
   const text = await res.text();
-  return { status: res.status, text, url: res.url };
+  return { status: res.status, text, url: res.url, redirected: res.redirected };
 }
 
 async function main() {
-  const build = await fetchText(`${TAXTAG.replace(/\/$/, "")}/js/build.js`);
+  const base = HUB.replace(/\/$/, "");
+
+  const build = await fetchRaw(`${base}/js/build.js`);
   if (build.status !== 200) fail("taxtag-build-js", `HTTP ${build.status}`);
   else {
     const ver = Number((build.text.match(/version:\s*(\d+)/) || [])[1] || 0);
@@ -32,38 +34,37 @@ async function main() {
     else fail("taxtag-version", `v${ver} < v${EXPECT_VERSION}`);
   }
 
-  const home = await fetchText(TAXTAG);
+  const home = await fetchRaw(`${base}/`);
   if (home.status !== 200) fail("taxtag-home", `HTTP ${home.status}`);
   else pass("taxtag-home", "200");
 
   if (home.text.includes('class="tax-hub-nav"')) pass("taxtag-bottom-nav");
   else fail("taxtag-bottom-nav", "missing tax-hub-nav");
 
-  const navLinks = [
-    'href="https://mynote-mytax.web.app/filings"',
-    'href="https://mynote-mytax.web.app/calc"',
-  ];
-  for (const href of navLinks) {
-    if (home.text.includes(href)) pass("taxtag-nav-link", href);
-    else fail("taxtag-nav-link", `missing ${href}`);
+  for (const href of ['href="/filings"', 'href="/calc"']) {
+    if (home.text.includes(href)) pass("same-origin-nav", href);
+    else fail("same-origin-nav", `missing ${href}`);
   }
 
-  if (home.text.includes('id="login-gate"')) {
-    const gateMatch = home.text.match(/<section class="hero" id="login-gate">[\s\S]*?<\/section>/);
-    const gateHtml = gateMatch?.[0] || "";
-    if (gateHtml.includes("mynote-mytax.web.app")) {
-      fail("no-duplicate-hero-links", "login-gate still links to my-tax");
-    } else {
-      pass("no-duplicate-hero-links");
-    }
+  if (home.text.includes("mynote-mytax.web.app")) {
+    fail("no-cross-domain-links", "HTML still references mynote-mytax.web.app");
   } else {
-    pass("no-duplicate-hero-links");
+    pass("no-cross-domain-links");
   }
 
-  for (const path of ["/", "/filings", "/calc"]) {
-    const r = await fetchText(`${MYTAX}${path}`);
-    if (r.status === 200) pass("mytax-route", `${path} → 200`);
-    else fail("mytax-route", `${path} → HTTP ${r.status}`);
+  for (const path of ["/filings", "/calc"]) {
+    const r = await fetchRaw(`${base}${path}`);
+    if (r.status === 200) pass("hub-route", `${path} → 200`);
+    else fail("hub-route", `${path} → HTTP ${r.status}`);
+  }
+
+  const legacy = await fetchRaw(`${LEGACY}/filings`, { redirect: "manual" });
+  if (legacy.status >= 301 && legacy.status <= 308) {
+    pass("legacy-redirect", `${LEGACY}/filings → ${legacy.status}`);
+  } else if (legacy.url.startsWith(base)) {
+    pass("legacy-redirect", `follows to ${legacy.url}`);
+  } else {
+    fail("legacy-redirect", `HTTP ${legacy.status} (expected 301 to ${base})`);
   }
 
   const failed = results.filter((r) => !r.ok);

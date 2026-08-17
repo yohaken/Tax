@@ -128,9 +128,10 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## my-tax on MyNote"
-            echo "- App: https://${SITE_ID}.web.app"
-            echo "- Filings: https://${SITE_ID}.web.app/filings"
-            echo "- Calculator: https://${SITE_ID}.web.app/calc"
+            echo "## my-tax on MyNote (unified hub)"
+            echo "- Hub: https://mynote-tax.web.app"
+            echo "- Filings: https://mynote-tax.web.app/filings"
+            echo "- Calculator: https://mynote-tax.web.app/calc"
+            echo "- Legacy mynote-mytax.web.app → 301 redirect"
             echo "- Cloud Run: ${SERVICE} (${REGION})"
           } >> "$GITHUB_STEP_SUMMARY"

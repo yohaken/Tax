@@ -3,7 +3,7 @@
  * หา TAX_FORM_*.pdf / ใบเสร็จ แล้วอัปโหลดเข้า live/local ให้เก็บถาวร (GCS)
  *
  * Usage:
- *   MY_TAX_BASE=https://mynote-mytax.web.app npm run import:pdfs
+ *   MY_TAX_BASE=https://mynote-tax.web.app npm run import:pdfs
  *   MY_TAX_PDF_DIR=/path/to/pdfs MY_TAX_BASE=... npm run import:pdfs
  */
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
@@ -12,7 +12,7 @@ import os from "node:os";
 
 const base =
   process.env.MY_TAX_BASE ||
-  "https://mynote-mytax.web.app";
+  "https://mynote-tax.web.app";
 const dir =
   process.env.MY_TAX_PDF_DIR || path.join(os.homedir(), "Downloads");
 

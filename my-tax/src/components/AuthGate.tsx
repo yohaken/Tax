@@ -137,7 +137,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <header className="app-header">
         <div className="app-main app-header-bar">
           <div className="app-header-left">
-            <Link href="/">
+            <Link href="/filings">
               <Heading as="h1" size="md" weight="semibold">
                 Tax
               </Heading>

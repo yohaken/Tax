@@ -1,6 +1,9 @@
-import { redirect } from "next/navigation";
+import { FilingsHome } from "@/components/FilingsHome";
 
-/** รวมเข้าหน้าแรกแล้ว — เก็บ route นี้ไว้เพื่อลิงก์เก่า */
-export default function FilingsPage() {
-  redirect("/");
+type Props = {
+  searchParams?: Promise<{ year?: string; agent?: string }>;
+};
+
+export default function FilingsPage({ searchParams }: Props) {
+  return <FilingsHome searchParams={searchParams} />;
 }

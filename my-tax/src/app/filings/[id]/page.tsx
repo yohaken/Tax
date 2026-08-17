@@ -18,7 +18,7 @@ export default async function FilingDetailPage({ params }: Props) {
   return (
     <Stack gap={6}>
       <div className="space-y-2">
-        <Link href="/" className="app-link">
+        <Link href="/filings" className="app-link">
           <Text as="span" size="sm">
             ← รายการ
           </Text>
