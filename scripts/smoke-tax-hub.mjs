@@ -48,12 +48,14 @@ async function main() {
     else fail("taxtag-nav-link", `missing ${href}`);
   }
 
-  if (home.text.includes('login-gate') && home.text.includes("mynote-mytax.web.app/filings")) {
-    const heroDup =
-      /id="login-gate"[\s\S]*?mynote-mytax\.web\.app\/filings/.test(home.text) &&
-      /hero-actions[\s\S]*?mynote-mytax\.web\.app\/filings/.test(home.text);
-    if (heroDup) fail("no-duplicate-hero-links", "login-gate still links to my-tax");
-    else pass("no-duplicate-hero-links");
+  if (home.text.includes('id="login-gate"')) {
+    const gateMatch = home.text.match(/<section class="hero" id="login-gate">[\s\S]*?<\/section>/);
+    const gateHtml = gateMatch?.[0] || "";
+    if (gateHtml.includes("mynote-mytax.web.app")) {
+      fail("no-duplicate-hero-links", "login-gate still links to my-tax");
+    } else {
+      pass("no-duplicate-hero-links");
+    }
   } else {
     pass("no-duplicate-hero-links");
   }
